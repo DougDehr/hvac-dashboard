@@ -1835,41 +1835,44 @@ elif "Pipeline" in page:
 elif "Territory" in page:
     page_header("Service Territory Map")
 
-    # Mock job locations around San Jose, CA (lat 37.3382, lon -121.8863)
+    # Mock job locations across Upstate NY — Buffalo, Rochester, Syracuse
     np.random.seed(55)
     random.seed(55)
 
     territory_customers = [
-        ("Pico Semiconductor",          "Chip/Semiconductor", 37.3875, -121.9730),
-        ("NovaTech Fabrication",        "Chip/Semiconductor", 37.4419, -122.1430),
-        ("SiliconCore Systems",         "Chip/Semiconductor", 37.3230, -121.9940),
-        ("Apex Wafer Technologies",     "Chip/Semiconductor", 37.5485, -121.9886),
-        ("Riverside Unified",           "Education",          37.2707, -121.8670),
-        ("Sunnyvale Community College", "Education",          37.3688, -122.0363),
-        ("Oakwood High School",         "Education",          37.2939, -121.9277),
-        ("Mesa Elementary District",    "Education",          37.2519, -121.8020),
-        ("Valley Technical Institute",  "Education",          37.4133, -121.9925),
-        ("Northgate Office Plaza",      "Office",             37.3861, -121.9734),
-        ("Centennial Tower",            "Office",             37.3382, -121.8863),
-        ("Harbor Business Park",        "Office",             37.3075, -121.9010),
-        ("Westside Corporate Center",   "Office",             37.3220, -122.0314),
-        ("Downtown Financial Suites",   "Office",             37.3348, -121.8896),
-        ("Innovation Plaza",            "Office",             37.4030, -121.9500),
-        ("The Burger Collective",       "Restaurant",         37.3500, -121.9100),
-        ("Golden Gate Bistro",          "Restaurant",         37.3612, -121.8990),
-        ("Pacific Rim Dining",          "Restaurant",         37.3150, -121.9350),
-        ("Sunset Grill Chain",          "Restaurant",         37.2800, -121.8750),
-        ("Harbor View Kitchen",         "Restaurant",         37.3700, -121.9200),
-        ("FusionChip Labs",             "Chip/Semiconductor", 37.4750, -121.9280),
-        ("Valley College",              "Education",          37.3980, -122.0600),
-        ("Summit Business Park",        "Office",             37.4200, -121.9100),
-        ("Metro Eats",                  "Restaurant",         37.3380, -121.9400),
-        ("Coastal High School",         "Education",          37.2500, -121.9100),
-        ("Pinnacle Tower",              "Office",             37.3650, -121.9650),
-        ("QuantumWafer Inc",            "Chip/Semiconductor", 37.5200, -122.0100),
-        ("Sunrise Diner Chain",         "Restaurant",         37.2950, -121.8100),
-        ("Ridgeline Corp Center",       "Office",             37.3100, -121.8600),
-        ("BlueChip Fab",                "Chip/Semiconductor", 37.4580, -121.9050),
+        # Buffalo area (42.88, -78.88)
+        ("Praxair Buffalo Facility",        "Chip/Semiconductor", 42.9150, -78.8420),
+        ("Moog Inc - East Aurora",          "Chip/Semiconductor", 42.7670, -78.6130),
+        ("Buffalo State College",           "Education",          42.9346, -78.8750),
+        ("Canisius University",             "Education",          42.9280, -78.8540),
+        ("Seneca Street Office Complex",    "Office",             42.8750, -78.8620),
+        ("Larkinville Business Center",     "Office",             42.8780, -78.8730),
+        ("Anchor Bar & Grill",              "Restaurant",         42.8990, -78.8640),
+        ("Lloyd Taco Factory",              "Restaurant",         42.9220, -78.8760),
+        ("Elmwood Village Dining",          "Restaurant",         42.9210, -78.8840),
+        ("NFTA Transit Center",             "Office",             42.8857, -78.8784),
+        # Rochester area (43.16, -77.61)
+        ("Paychex HQ",                      "Office",             43.1360, -77.5540),
+        ("Wegmans Corporate",               "Office",             43.1150, -77.6710),
+        ("University of Rochester",         "Education",          43.1283, -77.6275),
+        ("Monroe Community College",        "Education",          43.0840, -77.5660),
+        ("Rochester Institute of Tech",     "Education",          43.0848, -77.6741),
+        ("Finger Lakes Semiconductor",      "Chip/Semiconductor", 43.1720, -77.5880),
+        ("Photon Dynamics Rochester",       "Chip/Semiconductor", 43.1550, -77.6200),
+        ("Nick Tahou Hots",                 "Restaurant",         43.1570, -77.6330),
+        ("Edwards Restaurant Group",        "Restaurant",         43.1490, -77.5990),
+        ("Midtown Tower Office",            "Office",             43.1566, -77.6105),
+        # Syracuse area (43.05, -76.15)
+        ("Lockheed Martin - Syracuse",      "Chip/Semiconductor", 43.1050, -76.2100),
+        ("Welch Allyn / Hillrom",           "Chip/Semiconductor", 43.0600, -76.0320),
+        ("Syracuse University",             "Education",          43.0370, -76.1357),
+        ("Onondaga Community College",      "Education",          43.0210, -76.2100),
+        ("Le Moyne College",                "Education",          43.0688, -76.0808),
+        ("Armory Square Office Suites",     "Office",             43.0490, -76.1540),
+        ("Clinton Square Corporate Ctr",    "Office",             43.0520, -76.1520),
+        ("Dinosaur Bar-B-Que",              "Restaurant",         43.0618, -76.1616),
+        ("Pastabilities Restaurant",        "Restaurant",         43.0500, -76.1480),
+        ("Empire State Office Park",        "Office",             43.0800, -76.1750),
     ]
 
     map_records = []
@@ -1916,8 +1919,8 @@ elif "Territory" in page:
         hover_name="Customer",
         hover_data={"lat": False, "lon": False, "Value_K": False,
                     "Value": ":$,.0f", "Segment": True},
-        zoom=10,
-        center={"lat": 37.3382, "lon": -121.9000},
+        zoom=7,
+        center={"lat": 43.05, "lon": -77.20},
         mapbox_style="open-street-map",
         height=480,
     )
