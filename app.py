@@ -118,6 +118,69 @@ st.markdown("""
     margin-bottom: 8px;
     display: block;
   }
+
+  /* KPI drill-down expand buttons */
+  .kpi-expand-btn button {
+    background: rgba(255,255,255,0.02) !important;
+    border: 1px solid #30363D !important;
+    border-top: none !important;
+    border-radius: 0 0 10px 10px !important;
+    color: #8B949E !important;
+    font-size: 10px !important;
+    letter-spacing: .8px !important;
+    text-transform: uppercase !important;
+    font-weight: 600 !important;
+    padding: 5px 0 !important;
+    margin-top: 0 !important;
+    transition: all 0.15s !important;
+  }
+  .kpi-expand-btn button:hover {
+    color: #58A6FF !important;
+    background: rgba(33,150,243,0.06) !important;
+  }
+  .kpi-expand-active button {
+    color: #58A6FF !important;
+    background: rgba(33,150,243,0.10) !important;
+    border: 1px solid rgba(33,150,243,0.35) !important;
+    border-top: none !important;
+    border-radius: 0 0 10px 10px !important;
+    font-size: 10px !important;
+    letter-spacing: .8px !important;
+    text-transform: uppercase !important;
+    font-weight: 600 !important;
+    padding: 5px 0 !important;
+    margin-top: 0 !important;
+    width: 100% !important;
+  }
+  /* Detail panel */
+  .kpi-detail-panel {
+    background: linear-gradient(135deg, #0D1117, #161B22);
+    border: 1px solid #30363D;
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin: 4px 0 20px;
+  }
+  .kpi-detail-title {
+    color: #58A6FF;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 14px;
+  }
+  /* Forecast badge */
+  .forecast-badge {
+    display: inline-block;
+    background: rgba(255,152,0,0.12);
+    border: 1px solid rgba(255,152,0,0.4);
+    color: #FF9800;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .7px;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -158,7 +221,9 @@ def generate_data():
     np.random.seed(42)
     random.seed(42)
 
-    months = pd.date_range("2025-01-01", "2026-03-01", freq="MS")
+    # Jan 2025 – Mar 2026: actuals   |   Apr 2026 – Dec 2026: forecast
+    actual_months   = pd.date_range("2025-01-01", "2026-03-01", freq="MS")
+    forecast_months = pd.date_range("2026-04-01", "2026-12-01", freq="MS")
 
     # Seasonal multipliers (0=Jan … 11=Dec)
     seasons = {
@@ -167,29 +232,42 @@ def generate_data():
         "Restaurant":         [0.95, 0.90, 1.00, 1.05, 1.12, 1.18, 1.22, 1.18, 1.06, 1.00, 0.94, 0.94],
         "Chip/Semiconductor": [1.00, 0.75, 1.55, 0.65, 1.20, 0.88, 1.10, 1.35, 0.78, 1.62, 1.00, 0.88],
     }
-    bases = {"Education": 185_000, "Office": 225_000, "Restaurant": 92_000, "Chip/Semiconductor": 365_000}
-    noise = {"Education": (0.91,1.09), "Office": (0.89,1.11), "Restaurant": (0.95,1.05), "Chip/Semiconductor": (0.68,1.32)}
-    cogs_r = {"Education": (0.62,0.67), "Office": (0.64,0.70), "Restaurant": (0.70,0.75), "Chip/Semiconductor": (0.57,0.62)}
+    # Actual bases — calibrated so Jan-Mar 2026 ≈ $6 M
+    bases_act  = {"Education": 403_000, "Office": 490_000,
+                  "Restaurant": 200_000, "Chip/Semiconductor": 795_000}
+    # Forecast bases — calibrated so full-year 2026 (Q1 actual + Q2-Q4 fcst) ≈ $30 M
+    bases_fcst = {"Education": 567_000, "Office": 690_000,
+                  "Restaurant": 282_000, "Chip/Semiconductor": 1_119_000}
+    noise  = {"Education": (0.91,1.09), "Office": (0.89,1.11),
+               "Restaurant": (0.95,1.05), "Chip/Semiconductor": (0.68,1.32)}
+    cogs_r = {"Education": (0.62,0.67), "Office": (0.64,0.70),
+               "Restaurant": (0.70,0.75), "Chip/Semiconductor": (0.57,0.62)}
 
-    records = []
-    for m in months:
-        mi = m.month - 1
-        revs  = {s: bases[s] * seasons[s][mi] * np.random.uniform(*noise[s]) for s in ALL_SEGS}
-        cogs  = {s: revs[s] * np.random.uniform(*cogs_r[s]) for s in ALL_SEGS}
-        total = sum(revs.values())
-        tc    = sum(cogs.values())
-        gp    = total - tc
-        opex  = total * np.random.uniform(0.18, 0.22)
-        records.append(dict(
-            date=m,
-            month_label=m.strftime("%b %Y"),
-            education_rev=revs["Education"],      education_cogs=cogs["Education"],
-            office_rev=revs["Office"],            office_cogs=cogs["Office"],
-            restaurant_rev=revs["Restaurant"],    restaurant_cogs=cogs["Restaurant"],
-            chip_rev=revs["Chip/Semiconductor"],  chip_cogs=cogs["Chip/Semiconductor"],
-            total_rev=total, total_cogs=tc,
-            gross_profit=gp, opex=opex, ebitda=gp - opex,
-        ))
+    def _make_records(months, bases, is_forecast):
+        recs = []
+        for m in months:
+            mi   = m.month - 1
+            revs = {s: bases[s] * seasons[s][mi] * np.random.uniform(*noise[s]) for s in ALL_SEGS}
+            cogs = {s: revs[s] * np.random.uniform(*cogs_r[s]) for s in ALL_SEGS}
+            total = sum(revs.values())
+            tc    = sum(cogs.values())
+            gp    = total - tc
+            opex  = total * np.random.uniform(0.18, 0.22)
+            recs.append(dict(
+                date=m,
+                month_label=m.strftime("%b %Y"),
+                is_forecast=is_forecast,
+                education_rev=revs["Education"],      education_cogs=cogs["Education"],
+                office_rev=revs["Office"],            office_cogs=cogs["Office"],
+                restaurant_rev=revs["Restaurant"],    restaurant_cogs=cogs["Restaurant"],
+                chip_rev=revs["Chip/Semiconductor"],  chip_cogs=cogs["Chip/Semiconductor"],
+                total_rev=total, total_cogs=tc,
+                gross_profit=gp, opex=opex, ebitda=gp - opex,
+            ))
+        return recs
+
+    records  = _make_records(actual_months,   bases_act,  is_forecast=False)
+    records += _make_records(forecast_months, bases_fcst, is_forecast=True)
 
     df = pd.DataFrame(records)
     df["projected_rev"] = df["total_rev"].rolling(3, center=True, min_periods=1).mean() * 1.06
@@ -252,6 +330,8 @@ monthly_df, deals_df = generate_data()
 # ─── Session State ────────────────────────────────────────────────────────────
 if "drill_seg" not in st.session_state:
     st.session_state.drill_seg = None
+if "active_kpi" not in st.session_state:
+    st.session_state.active_kpi = None
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -283,9 +363,9 @@ with st.sidebar:
     max_d = monthly_df["date"].max().date()
     ca, cb = st.columns(2)
     with ca:
-        start_date = st.date_input("From", value=date(2025, 1, 1), min_value=min_d, max_value=max_d)
+        start_date = st.date_input("From", value=date(2026, 1, 1), min_value=min_d, max_value=max_d)
     with cb:
-        end_date = st.date_input("To",   value=date(2025, 12, 1), min_value=min_d, max_value=max_d)
+        end_date = st.date_input("To",   value=date(2026, 3, 1), min_value=min_d, max_value=max_d)
 
     st.markdown('<hr style="border:none;border-top:1px solid #21262D;margin:14px 0">', unsafe_allow_html=True)
 
@@ -486,32 +566,24 @@ def chart_label(text):
 if "Sales" in page:
     page_header("Sales Overview", date_label)
 
-    # KPIs
-    total_rev = fdf["seg_rev"].sum()
-    pipeline  = deals_df[deals_df["Status"].isin(["In Progress", "Proposal Sent"])]["Value"].sum()
+    # ── Derived metrics ───────────────────────────────────────────────────────
+    # YTD = actual months in 2026 only (Jan–Mar), regardless of date filter
+    ytd_df  = monthly_df[(monthly_df["is_forecast"] == False) &
+                          (monthly_df["date"].dt.year == 2026)].copy()
+    ytd_df["seg_rev"] = ytd_df[rev_cols].sum(axis=1)
+    ytd_rev = ytd_df["seg_rev"].sum()                              # ≈ $6 M
+
+    pipeline_deals = deals_df[deals_df["Status"].isin(["In Progress", "Proposal Sent"])]
+    pipeline  = pipeline_deals["Value"].sum()
     won       = deals_df[deals_df["Status"] == "Closed Won"]
     n_closed  = len(won)
     avg_deal  = won["Value"].mean() if n_closed else 0
 
-    k1, k2, k3, k4 = st.columns(4)
-    for col, lbl, val, delta, pos, acc in [
-        (k1, "Total Revenue YTD", fmt_usd(total_rev), "+12.4% vs prior year", True,  BLUE),
-        (k2, "Pipeline Value",    fmt_usd(pipeline),  "+8.1% vs last quarter", True,  TEAL),
-        (k3, "Deals Closed",      str(n_closed),      "+5 vs prior year",      True,  GREEN),
-        (k4, "Avg Deal Size",     fmt_usd(avg_deal),  "+3.2% vs prior year",   True,  ORANGE),
-    ]:
-        with col:
-            st.markdown(kpi_card(lbl, val, delta, pos, acc), unsafe_allow_html=True)
-
-    # ── Sales Productivity KPIs (row 2) ───────────────────────────────────────
-    st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
-
-    # Derived productivity metrics
-    n_reps         = 6                                         # mock headcount
-    annual_quota   = 520_000 * n_reps                         # $520K quota/rep
-    quota_attain   = total_rev / annual_quota * 100 if annual_quota else 0
-    rev_per_rep    = total_rev / n_reps if n_reps else 0
-    avg_cycle_days = 42                                        # mock avg sales cycle
+    n_reps         = 6
+    annual_quota   = 520_000 * n_reps
+    quota_attain   = ytd_rev / (annual_quota / 4) * 100   # vs Q1 quota
+    rev_per_rep    = ytd_rev / n_reps
+    avg_cycle_days = 42
     all_deals      = deals_df[deals_df["Segment"].isin(active_segs)]
     total_d        = len(all_deals)
     win_rate_pct   = len(all_deals[all_deals["Status"] == "Closed Won"]) / total_d * 100 if total_d else 0
@@ -519,45 +591,219 @@ if "Sales" in page:
     n_pipe         = len(pipe_deals)
     proj_close     = pipe_deals["Value"].sum() * (win_rate_pct / 100)
 
-    # Status color logic
-    qa_acc  = GREEN if quota_attain >= 90 else (ORANGE if quota_attain >= 70 else RED)
-    wr_acc  = GREEN if win_rate_pct >= 60 else (ORANGE if win_rate_pct >= 40 else RED)
+    qa_acc = GREEN if quota_attain >= 90 else (ORANGE if quota_attain >= 70 else RED)
+    wr_acc = GREEN if win_rate_pct >= 60 else (ORANGE if win_rate_pct >= 40 else RED)
 
-    p1, p2, p3, p4, p5, p6 = st.columns(6)
-    for col, lbl, val, delta, pos, acc in [
-        (p1, "Quota Attainment",      f"{quota_attain:.0f}%",   "vs 80% target",          quota_attain >= 80,  qa_acc),
-        (p2, "Revenue / Rep",         fmt_usd(rev_per_rep),     "+6.1% vs prior year",    True,                BLUE),
-        (p3, "Avg Sales Cycle",       f"{avg_cycle_days}d",     "−4d vs prior year",      True,                TEAL),
-        (p4, "Win Rate %",            f"{win_rate_pct:.0f}%",   "vs 55% target",          win_rate_pct >= 55,  wr_acc),
-        (p5, "Deals in Pipeline",     str(n_pipe),              f"{n_pipe} active",       True,                ORANGE),
-        (p6, "Projected Close Value", fmt_usd(proj_close),      "pipeline × win rate",    True,                PURPLE),
-    ]:
-        with col:
+    # ── Helper: render a clickable KPI card ───────────────────────────────────
+    def clickable_kpi(col_obj, kpi_key, lbl, val, delta, pos, acc):
+        is_act = st.session_state.active_kpi == kpi_key
+        with col_obj:
             st.markdown(kpi_card(lbl, val, delta, pos, acc), unsafe_allow_html=True)
+            div_cls = "kpi-expand-active" if is_act else "kpi-expand-btn"
+            st.markdown(f'<div class="{div_cls}">', unsafe_allow_html=True)
+            btn_label = "▴ close" if is_act else "▾ view details"
+            if st.button(btn_label, key=f"kpibtn_{kpi_key}", use_container_width=True):
+                st.session_state.active_kpi = None if is_act else kpi_key
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+    # ── Row 1 KPI cards ───────────────────────────────────────────────────────
+    k1, k2, k3, k4 = st.columns(4)
+    clickable_kpi(k1, "ytd_rev",   "Total Revenue YTD", fmt_usd(ytd_rev), "+18.4% vs Q1 prior year", True,  BLUE)
+    clickable_kpi(k2, "pipeline",  "Pipeline Value",    fmt_usd(pipeline), "+8.1% vs last quarter",  True,  TEAL)
+    clickable_kpi(k3, "deals",     "Deals Closed",      str(n_closed),     "+5 vs prior year",       True,  GREEN)
+    clickable_kpi(k4, "avg_deal",  "Avg Deal Size",     fmt_usd(avg_deal), "+3.2% vs prior year",    True,  ORANGE)
 
-    # ── Row 1: Actual vs Projected  |  GM% by Segment ─────────────────────────
+    # ── Row 1 detail panel ────────────────────────────────────────────────────
+    if st.session_state.active_kpi == "ytd_rev":
+        st.markdown('<div class="kpi-detail-panel">', unsafe_allow_html=True)
+        st.markdown('<div class="kpi-detail-title">📊 Total Revenue YTD — Monthly Breakdown</div>', unsafe_allow_html=True)
+        dc1, dc2 = st.columns([2, 1])
+        with dc1:
+            fig_d = go.Figure(go.Bar(
+                x=ytd_df["month_label"], y=ytd_df["seg_rev"],
+                marker_color=[BLUE, TEAL, GREEN], marker_opacity=0.85,
+                hovertemplate="<b>%{x}</b><br>Revenue: $%{y:,.0f}<extra></extra>",
+            ))
+            fig_d.update_yaxes(tickprefix="$", tickformat=",.0f")
+            base_layout(fig_d, height=220, legend=False, title="Jan–Mar 2026 Actuals")
+            st.plotly_chart(fig_d, use_container_width=True, config=CHART_CFG)
+        with dc2:
+            st.markdown(f"""
+            <div style="padding:16px 0">
+              <div style="color:#8B949E;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px">YTD Actual</div>
+              <div style="color:#E6EDF3;font-size:22px;font-weight:700">{fmt_usd(ytd_rev)}</div>
+              <div style="color:#3FB950;font-size:11px;margin-top:4px">▲ +18.4% vs Q1 prior year</div>
+              <div style="margin-top:16px;color:#8B949E;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px">Full-Year Forecast</div>
+              <div style="color:{ORANGE};font-size:22px;font-weight:700">$30.00M</div>
+              <div style="color:#8B949E;font-size:11px;margin-top:4px">{fmt_usd(ytd_rev)} actual + {fmt_usd(30_000_000-ytd_rev)} forecast</div>
+            </div>
+            """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    elif st.session_state.active_kpi == "pipeline":
+        st.markdown('<div class="kpi-detail-panel">', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-detail-title">🔵 Pipeline Value — {fmt_usd(pipeline)} across {len(pipeline_deals)} deals</div>', unsafe_allow_html=True)
+        # Segment subtotals
+        pipe_seg = pipeline_deals.groupby("Segment")["Value"].agg(["sum","count"]).reset_index()
+        pipe_seg.columns = ["Segment","Total Value","# Deals"]
+        pipe_seg["Avg Deal"] = pipe_seg["Total Value"] / pipe_seg["# Deals"]
+        pipe_seg_disp = pipe_seg.copy()
+        pipe_seg_disp["Total Value"] = pipe_seg_disp["Total Value"].map(lambda v: f"${v:,.0f}")
+        pipe_seg_disp["Avg Deal"]    = pipe_seg_disp["Avg Deal"].map(lambda v: f"${v:,.0f}")
+        pc1, pc2 = st.columns([1, 2])
+        with pc1:
+            st.dataframe(pipe_seg_disp, use_container_width=True, hide_index=True)
+        with pc2:
+            pipe_deals_disp = pipeline_deals.copy()
+            pipe_deals_disp["Value"] = pipe_deals_disp["Value"].map(lambda v: f"${v:,.0f}")
+            pipe_deals_disp.rename(columns={"Job_Type":"Job Type","Close_Date":"Close Date","Status":"Status"}, inplace=True)
+            st.dataframe(
+                pipe_deals_disp.sort_values("Close Date", ascending=False)
+                    [["Customer","Segment","Job Type","Value","Status","Close Date"]],
+                use_container_width=True, hide_index=True, height=220,
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    elif st.session_state.active_kpi == "deals":
+        st.markdown('<div class="kpi-detail-panel">', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-detail-title">🟢 Closed Won Deals — {n_closed} total, {fmt_usd(won["Value"].sum())} booked</div>', unsafe_allow_html=True)
+        won_disp = won.copy()
+        won_disp["Value"] = won_disp["Value"].map(lambda v: f"${v:,.0f}")
+        won_disp.rename(columns={"Job_Type":"Job Type","Close_Date":"Close Date"}, inplace=True)
+        st.dataframe(
+            won_disp.sort_values("Close Date", ascending=False)
+                [["Customer","Segment","Job Type","Value","Close Date"]],
+            use_container_width=True, hide_index=True, height=240,
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    elif st.session_state.active_kpi == "avg_deal":
+        st.markdown('<div class="kpi-detail-panel">', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-detail-title">💰 Avg Deal Size — {fmt_usd(avg_deal)} overall</div>', unsafe_allow_html=True)
+        seg_avg = deals_df[deals_df["Status"] == "Closed Won"].groupby("Segment")["Value"].mean().reset_index()
+        seg_avg.columns = ["Segment","Avg Deal Size"]
+        fig_avg = go.Figure(go.Bar(
+            x=seg_avg["Segment"], y=seg_avg["Avg Deal Size"],
+            marker_color=[SEG_COLOR[s] for s in seg_avg["Segment"]],
+            marker_opacity=0.85,
+            text=seg_avg["Avg Deal Size"].map(lambda v: fmt_usd(v)),
+            textposition="outside",
+            hovertemplate="<b>%{x}</b><br>Avg Deal: $%{y:,.0f}<extra></extra>",
+        ))
+        fig_avg.update_yaxes(tickprefix="$", tickformat=",.0f")
+        base_layout(fig_avg, height=220, legend=False, title="Avg Closed Won Deal Size by Segment")
+        st.plotly_chart(fig_avg, use_container_width=True, config=CHART_CFG)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Row 2 productivity KPI cards ──────────────────────────────────────────
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+    p1, p2, p3, p4, p5, p6 = st.columns(6)
+    clickable_kpi(p1, "quota",      "Quota Attainment",      f"{quota_attain:.0f}%",  "vs 80% Q1 target",    quota_attain >= 80, qa_acc)
+    clickable_kpi(p2, "rev_rep",    "Revenue / Rep",         fmt_usd(rev_per_rep),    "+6.1% vs prior year", True,               BLUE)
+    clickable_kpi(p3, "cycle",      "Avg Sales Cycle",       f"{avg_cycle_days}d",    "−4d vs prior year",   True,               TEAL)
+    clickable_kpi(p4, "win_rate",   "Win Rate %",            f"{win_rate_pct:.0f}%",  "vs 55% target",       win_rate_pct >= 55, wr_acc)
+    clickable_kpi(p5, "n_pipe",     "Deals in Pipeline",     str(n_pipe),             f"{n_pipe} active",    True,               ORANGE)
+    clickable_kpi(p6, "proj_close", "Projected Close Value", fmt_usd(proj_close),     "pipeline × win rate", True,               PURPLE)
+
+    # ── Row 2 detail panels ───────────────────────────────────────────────────
+    if st.session_state.active_kpi == "win_rate":
+        st.markdown('<div class="kpi-detail-panel">', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-detail-title">🎯 Win Rate — {win_rate_pct:.0f}% overall</div>', unsafe_allow_html=True)
+        wr_seg = deals_df.groupby("Segment").apply(
+            lambda g: pd.Series({"Won": (g["Status"]=="Closed Won").sum(),
+                                  "Lost": (g["Status"]=="Closed Lost").sum(),
+                                  "Total": len(g)})
+        ).reset_index()
+        wr_seg["Win Rate %"] = (wr_seg["Won"] / wr_seg["Total"] * 100).round(1)
+        wc1, wc2 = st.columns([1, 2])
+        with wc1:
+            wr_disp = wr_seg.copy()
+            wr_disp["Win Rate %"] = wr_disp["Win Rate %"].map(lambda v: f"{v:.1f}%")
+            st.dataframe(wr_disp, use_container_width=True, hide_index=True)
+        with wc2:
+            fig_wr = go.Figure()
+            fig_wr.add_trace(go.Bar(name="Won",  x=wr_seg["Segment"], y=wr_seg["Won"],
+                                    marker_color=GREEN, marker_opacity=0.85,
+                                    hovertemplate="<b>%{x}</b><br>Won: %{y}<extra></extra>"))
+            fig_wr.add_trace(go.Bar(name="Lost", x=wr_seg["Segment"], y=wr_seg["Lost"],
+                                    marker_color=RED, marker_opacity=0.85,
+                                    hovertemplate="<b>%{x}</b><br>Lost: %{y}<extra></extra>"))
+            fig_wr.update_layout(barmode="group")
+            base_layout(fig_wr, height=220, title="Won vs Lost by Segment")
+            st.plotly_chart(fig_wr, use_container_width=True, config=CHART_CFG)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    elif st.session_state.active_kpi in ("n_pipe", "proj_close"):
+        st.markdown('<div class="kpi-detail-panel">', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-detail-title">🔵 Pipeline Deals — {n_pipe} active, {fmt_usd(proj_close)} projected to close</div>', unsafe_allow_html=True)
+        pd_disp = pipe_deals.copy()
+        pd_disp["Value"] = pd_disp["Value"].map(lambda v: f"${v:,.0f}")
+        pd_disp.rename(columns={"Job_Type":"Job Type","Close_Date":"Close Date"}, inplace=True)
+        st.dataframe(
+            pd_disp.sort_values("Value", ascending=False)
+                [["Customer","Segment","Job Type","Value","Status","Close Date"]],
+            use_container_width=True, hide_index=True, height=240,
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    elif st.session_state.active_kpi in ("quota", "rev_rep"):
+        st.markdown('<div class="kpi-detail-panel">', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-detail-title">👤 Rep Productivity — Q1 2026</div>', unsafe_allow_html=True)
+        reps = [f"Rep {i+1}" for i in range(n_reps)]
+        np.random.seed(7)
+        rep_rev = np.random.uniform(0.6, 1.3, n_reps) * (ytd_rev / n_reps)
+        rep_quota = annual_quota / 4 / n_reps
+        rep_attain = rep_rev / rep_quota * 100
+        rep_df = pd.DataFrame({"Rep": reps,
+                                "Q1 Revenue": [fmt_usd(v) for v in rep_rev],
+                                "Quota": fmt_usd(rep_quota),
+                                "Attainment": [f"{v:.0f}%" for v in rep_attain]})
+        st.dataframe(rep_df, use_container_width=True, hide_index=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
+
+    # ── Row 1: Actuals + Forecast chart  |  GM% by Segment ───────────────────
     r1, r2 = st.columns(2)
 
     with r1:
+        # Always show full-year 2026: actuals (Jan–Mar) solid + forecast (Apr–Dec) dashed
+        yr2026 = monthly_df[monthly_df["date"].dt.year == 2026].copy()
+        yr2026["seg_rev"] = yr2026[rev_cols].sum(axis=1)
+        act_26  = yr2026[yr2026["is_forecast"] == False]
+        fcst_26 = yr2026[yr2026["is_forecast"] == True]
+        # Include last actual in forecast trace so lines connect
+        fcst_conn = pd.concat([act_26.tail(1), fcst_26])
+
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=fdf["month_label"], y=fdf["seg_rev"],
+            x=act_26["month_label"], y=act_26["seg_rev"],
             name="Actual",
-            line=dict(color=BLUE, width=2.5),
-            fill="tozeroy", fillcolor="rgba(33,150,243,0.10)",
+            line=dict(color=BLUE, width=2.8),
+            fill="tozeroy", fillcolor="rgba(33,150,243,0.12)",
             hovertemplate="<b>%{x}</b><br>Actual: $%{y:,.0f}<extra></extra>",
         ))
         fig.add_trace(go.Scatter(
-            x=fdf["month_label"], y=fdf["seg_projected"],
-            name="Projected",
-            line=dict(color=GREEN, width=2, dash="dash"),
-            hovertemplate="<b>%{x}</b><br>Projected: $%{y:,.0f}<extra></extra>",
+            x=fcst_conn["month_label"], y=fcst_conn["seg_rev"],
+            name="Forecast",
+            line=dict(color=ORANGE, width=2.2, dash="dash"),
+            fill="tozeroy", fillcolor="rgba(255,152,0,0.06)",
+            hovertemplate="<b>%{x}</b><br>Forecast: $%{y:,.0f}<extra></extra>",
         ))
+        # Full-year $30M target line (monthly equivalent)
+        target_mo = 30_000_000 / 12
+        fig.add_hline(y=target_mo, line_dash="dot", line_color=GREEN, line_width=1.4,
+                      annotation_text="$30M target / mo", annotation_position="top right",
+                      annotation_font=dict(color=GREEN, size=10))
+        # Actuals | Forecast divider
+        fig.add_vline(x="Mar 2026", line_dash="dot", line_color="#30363D", line_width=1,
+                      annotation_text=" ← Actual  |  Forecast →",
+                      annotation_position="top", annotation_font=dict(color="#8B949E", size=10))
         fig.update_yaxes(tickprefix="$", tickformat=",.0f")
         fig.update_xaxes(tickangle=-40)
-        base_layout(fig, title="Monthly Actual vs Projected Revenue")
+        total_fcst_rev = yr2026["seg_rev"].sum()
+        base_layout(fig, title=f"2026 Monthly Revenue — Actuals vs Forecast  (FY est. {fmt_usd(total_fcst_rev)})")
         st.plotly_chart(fig, use_container_width=True, config=CHART_CFG)
 
     with r2:
