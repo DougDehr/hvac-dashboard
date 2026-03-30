@@ -791,11 +791,6 @@ if "Sales" in page:
             fill="tozeroy", fillcolor="rgba(255,152,0,0.06)",
             hovertemplate="<b>%{x}</b><br>Forecast: $%{y:,.0f}<extra></extra>",
         ))
-        # Full-year $30M target line (monthly equivalent)
-        target_mo = 30_000_000 / 12
-        fig.add_hline(y=target_mo, line_dash="dot", line_color=GREEN, line_width=1.4,
-                      annotation_text="$30M target / mo", annotation_position="top right",
-                      annotation_font=dict(color=GREEN, size=10))
         # Actuals | Forecast divider — annotation added separately (add_vline annotation
         # fails on categorical axes in Plotly ≥ 5.20 because it tries to mean() strings)
         fig.add_vline(x="Mar 2026", line_dash="dot", line_color="#30363D", line_width=1)
@@ -1186,86 +1181,74 @@ elif "Jobs" in page:
 elif "LRP" in page:
     page_header("Long Range Plan — Revenue & Headcount Model")
 
-    # ── Sidebar / Inline Inputs ────────────────────────────────────────────────
+    # ── Model Inputs ──────────────────────────────────────────────────────────
     st.markdown(
         '<div style="background:linear-gradient(135deg,#161B22,#1C2333);'
-        'border:1px solid #30363D;border-radius:10px;padding:20px 24px 16px;'
-        'margin-bottom:24px">'
+        'border:1px solid #30363D;border-radius:10px;padding:20px 24px 16px;margin-bottom:24px">'
         '<div style="color:#8B949E;font-size:10px;font-weight:700;text-transform:uppercase;'
         'letter-spacing:.9px;margin-bottom:16px">Model Inputs</div>',
         unsafe_allow_html=True,
     )
 
-    inp1, inp2, inp3 = st.columns(3)
-    inp4, inp5, inp6 = st.columns(3)
+    ir1c1, ir1c2, ir1c3, ir1c4, ir1c5, ir1c6 = st.columns(6)
+    with ir1c1:
+        target_26 = st.number_input("2026 Target ($M)", min_value=1.0, max_value=200.0, value=30.0, step=1.0)
+    with ir1c2:
+        target_27 = st.number_input("2027 Target ($M)", min_value=1.0, max_value=200.0, value=40.0, step=1.0)
+    with ir1c3:
+        target_28 = st.number_input("2028 Target ($M)", min_value=1.0, max_value=200.0, value=50.0, step=1.0)
+    with ir1c4:
+        quota_per_rep = st.slider("Quota / Rep ($K)", min_value=300, max_value=2000, value=500, step=25, format="$%dK")
+    with ir1c5:
+        attainment_pct = st.slider("Attainment %", min_value=50, max_value=100, value=75, step=5, format="%d%%")
+    with ir1c6:
+        ramp_months = st.slider("Ramp Time (mo)", min_value=1, max_value=6, value=3, step=1)
 
-    with inp1:
-        target_rev = st.slider(
-            "Target Revenue ($M)", min_value=1.0, max_value=10.0,
-            value=3.0, step=0.25, format="$%.2fM",
-        )
-    with inp2:
-        quota_per_rep = st.slider(
-            "Avg Quota / Rep ($K)", min_value=300, max_value=800,
-            value=500, step=25, format="$%dK",
-        )
-    with inp3:
-        attainment_pct = st.slider(
-            "Quota Attainment %", min_value=50, max_value=100,
-            value=75, step=5, format="%d%%",
-        )
-    with inp4:
-        ramp_months = st.slider(
-            "Ramp Time (months)", min_value=1, max_value=6,
-            value=3, step=1,
-        )
-    with inp5:
-        current_reps = st.number_input(
-            "Current Reps", min_value=1, max_value=50,
-            value=3, step=1,
-        )
-    with inp6:
-        current_rev_m = st.number_input(
-            "Current Revenue ($M)", min_value=0.1, max_value=10.0,
-            value=2.4, step=0.1, format="%.1f",
-        )
+    ir2c1, ir2c2, _ = st.columns([1, 1, 4])
+    with ir2c1:
+        current_reps  = st.number_input("Current Reps", min_value=1, max_value=200, value=6, step=1)
+    with ir2c2:
+        current_rev_m = st.number_input("Current Rev ($M)", min_value=0.1, max_value=200.0, value=6.0, step=0.5, format="%.1f")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ── Core Math ──────────────────────────────────────────────────────────────
-    target_rev_dollars    = target_rev * 1_000_000
-    quota_per_rep_dollars = quota_per_rep * 1_000
-    current_rev_dollars   = current_rev_m * 1_000_000
-    eff_rev_per_rep       = quota_per_rep_dollars * (attainment_pct / 100)  # effective annual contribution
+    # ── Core Math ─────────────────────────────────────────────────────────────
+    eff_rev_per_rep = (quota_per_rep * 1_000) * (attainment_pct / 100)
+    year_targets    = {2026: target_26 * 1e6, 2027: target_27 * 1e6, 2028: target_28 * 1e6}
+    ramp_qtrs       = max(1, int(np.ceil(ramp_months / 3)))
 
-    reps_needed  = int(np.ceil(target_rev_dollars / eff_rev_per_rep))
-    reps_to_hire = max(0, reps_needed - current_reps)
-    rev_gap      = max(0.0, target_rev_dollars - current_rev_dollars)
+    # Cumulative reps needed at end of each year
+    reps_cum = {yr: int(np.ceil(t / eff_rev_per_rep)) for yr, t in year_targets.items()}
 
-    # Estimate time to goal: current reps produce current_rev; each new rep adds
-    # eff_rev_per_rep after their ramp month. Hire evenly across quarters.
-    if reps_to_hire == 0:
-        months_to_goal = 0
-    else:
-        reps_per_qtr = max(1, int(np.ceil(reps_to_hire / 4)))
-        months_to_goal = ramp_months + int(np.ceil(reps_to_hire / reps_per_qtr)) * 3
+    # Incremental hires per year
+    hires_yr = {
+        2026: max(0, reps_cum[2026] - current_reps),
+        2027: max(0, reps_cum[2027] - reps_cum[2026]),
+        2028: max(0, reps_cum[2028] - reps_cum[2027]),
+    }
+    total_to_hire = sum(hires_yr.values())
 
-    # Color signal helpers
-    def _sig(v, good, warn):
-        return GREEN if v >= good else (ORANGE if v >= warn else RED)
+    # Spread each year's hires evenly across that year's 4 quarters
+    # Quarter index: 0–3 = 2026, 4–7 = 2027, 8–11 = 2028
+    hires_by_q = []
+    for yr in [2026, 2027, 2028]:
+        h = hires_yr[yr]
+        base, rem = h // 4, h % 4
+        hires_by_q.extend([base + (1 if i < rem else 0) for i in range(4)])
 
-    gap_color  = GREEN if rev_gap == 0 else (ORANGE if rev_gap < target_rev_dollars * 0.25 else RED)
-    hire_color = GREEN if reps_to_hire == 0 else (ORANGE if reps_to_hire <= 3 else RED)
+    rev_gap_26   = max(0.0, year_targets[2026] - current_rev_m * 1e6)
+    gap_color    = GREEN if rev_gap_26 == 0 else (ORANGE if rev_gap_26 < year_targets[2026] * 0.25 else RED)
+    hire_color   = GREEN if total_to_hire == 0 else (ORANGE if total_to_hire <= 5 else RED)
 
     # ── KPI Cards ─────────────────────────────────────────────────────────────
-    lk1, lk2, lk3, lk4 = st.columns(4)
+    lk1, lk2, lk3, lk4, lk5, lk6 = st.columns(6)
     for col, lbl, val, delta, pos, acc in [
-        (lk1, "Reps Needed",   str(reps_needed),          f"at {attainment_pct}% attainment", True,            BLUE),
-        (lk2, "Reps to Hire",  str(reps_to_hire),         f"have {current_reps} today",        reps_to_hire==0, hire_color),
-        (lk3, "Revenue Gap",   fmt_usd(rev_gap),           f"to ${target_rev:.2f}M target",    rev_gap==0,      gap_color),
-        (lk4, "Time to Goal",  f"{months_to_goal}mo" if months_to_goal else "On Track",
-                               f"{ramp_months}mo ramp included",
-                               months_to_goal <= 12, GREEN if months_to_goal <= 12 else (ORANGE if months_to_goal <= 18 else RED)),
+        (lk1, "2026 Target",       f"${target_26:.0f}M",      "Year 1 goal",                  True,               BLUE),
+        (lk2, "2027 Target",       f"${target_27:.0f}M",      "Year 2 goal",                  True,               TEAL),
+        (lk3, "2028 Target",       f"${target_28:.0f}M",      "Year 3 goal",                  True,               GREEN),
+        (lk4, "Reps by 2028",      str(reps_cum[2028]),       f"need {reps_cum[2028]} total",  True,               ORANGE),
+        (lk5, "Total to Hire",     str(total_to_hire),        f"have {current_reps} today",   total_to_hire == 0, hire_color),
+        (lk6, "2026 Revenue Gap",  fmt_usd(rev_gap_26),       f"to ${target_26:.0f}M target", rev_gap_26 == 0,    gap_color),
     ]:
         with col:
             st.markdown(kpi_card(lbl, val, delta, pos, acc), unsafe_allow_html=True)
@@ -1273,171 +1256,144 @@ elif "LRP" in page:
     st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
 
     # ── Formula Callout ────────────────────────────────────────────────────────
-    formula_color = GREEN if reps_to_hire == 0 else (ORANGE if reps_to_hire <= 3 else RED)
+    formula_color = GREEN if total_to_hire == 0 else (ORANGE if total_to_hire <= 5 else RED)
     hire_sentence = (
-        "You're already at or above target! No new hires required."
-        if reps_to_hire == 0
-        else f"You have <strong>{current_reps}</strong>. Hire <strong style='color:{formula_color}'>{reps_to_hire} more</strong>."
+        "Your current team can cover the plan — no new hires required."
+        if total_to_hire == 0
+        else (f"You have <strong>{current_reps}</strong> today. "
+              f"Hire <strong style='color:{formula_color}'>{total_to_hire} more</strong> "
+              f"across 12 quarters ({hires_yr[2026]} in 2026 · {hires_yr[2027]} in 2027 · {hires_yr[2028]} in 2028).")
     )
     st.markdown(f"""
-    <div style="
-        background: linear-gradient(135deg,#161B22,#1C2333);
-        border: 1px solid #30363D;
-        border-left: 5px solid {formula_color};
-        border-radius: 10px;
-        padding: 22px 28px;
-        margin-bottom: 20px;
-    ">
+    <div style="background:linear-gradient(135deg,#161B22,#1C2333);border:1px solid #30363D;
+                border-left:5px solid {formula_color};border-radius:10px;
+                padding:22px 28px;margin-bottom:20px">
       <div style="color:#8B949E;font-size:10px;font-weight:700;text-transform:uppercase;
-                  letter-spacing:.9px;margin-bottom:12px">Formula Breakdown</div>
-      <div style="color:#E6EDF3;font-size:17px;font-weight:600;line-height:1.6">
+                  letter-spacing:.9px;margin-bottom:12px">3-Year Plan Breakdown</div>
+      <div style="color:#E6EDF3;font-size:17px;font-weight:600;line-height:1.7">
         To hit
-        <span style="color:{BLUE};">${target_rev:.2f}M</span>
-        at
-        <span style="color:{TEAL};">{attainment_pct}% attainment</span>
-        on a
-        <span style="color:{ORANGE};">${quota_per_rep:,}K quota</span>,
-        you need
-        <span style="color:{formula_color};font-size:22px;font-weight:800;">{reps_needed} reps</span>.
+        <span style="color:{BLUE};">${target_26:.0f}M</span> →
+        <span style="color:{TEAL};">${target_27:.0f}M</span> →
+        <span style="color:{GREEN};">${target_28:.0f}M</span>
+        at <span style="color:{ORANGE};">{attainment_pct}% attainment</span>
+        on a <span style="color:{ORANGE};">${quota_per_rep:,}K quota</span>,
+        you need <span style="color:{formula_color};font-size:22px;font-weight:800;">{reps_cum[2028]} reps</span> by end of 2028.
         {hire_sentence}
       </div>
       <div style="margin-top:14px;color:#8B949E;font-size:12px;line-height:1.8">
-        <span style="color:#C9D1D9">Effective rev / rep:</span>
-        ${eff_rev_per_rep:,.0f} &nbsp;·&nbsp;
-        <span style="color:#C9D1D9">Revenue gap:</span>
-        {fmt_usd(rev_gap)} &nbsp;·&nbsp;
-        <span style="color:#C9D1D9">Ramp time:</span>
-        {ramp_months} months &nbsp;·&nbsp;
-        <span style="color:#C9D1D9">Est. time to goal:</span>
-        {months_to_goal if months_to_goal else "Now"} months
+        <span style="color:#C9D1D9">Rev / rep (effective):</span> {fmt_usd(eff_rev_per_rep)} &nbsp;·&nbsp;
+        <span style="color:#C9D1D9">Ramp time:</span> {ramp_months} mo ({ramp_qtrs} qtrs) &nbsp;·&nbsp;
+        <span style="color:#C9D1D9">2026 reps needed:</span> {reps_cum[2026]} &nbsp;·&nbsp;
+        <span style="color:#C9D1D9">2027 reps needed:</span> {reps_cum[2027]}
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Build 24-month Growth Model ────────────────────────────────────────────
-    # Hiring plan: spread new hires evenly across Q1–Q4 (first year)
-    quarters = ["Q1 2026", "Q2 2026", "Q3 2026", "Q4 2026",
-                "Q1 2027", "Q2 2027", "Q3 2027", "Q4 2027"]
+    # ── Build 12-Quarter Revenue Model ────────────────────────────────────────
+    quarters_12 = [f"Q{q+1} {yr}" for yr in [2026, 2027, 2028] for q in range(4)]
+    yr_for_q    = [yr for yr in [2026, 2027, 2028] for _ in range(4)]
 
-    base_per_q = reps_to_hire // 4
-    remainder  = reps_to_hire % 4
-    hires_by_q = [base_per_q + (1 if i < remainder else 0) for i in range(4)] + [0]*4
+    # Revenue per quarter per cohort
+    cohort_keys = ["Current Team", "2026 Hires", "2027 Hires", "2028 Hires"]
+    cohort_hire_start_q = {
+        "2026 Hires": 0,   # hired across Q0–Q3 (2026)
+        "2027 Hires": 4,   # hired across Q4–Q7 (2027)
+        "2028 Hires": 8,   # hired across Q8–Q11 (2028)
+    }
+    cohort_colors_map = {
+        "Current Team": BLUE,
+        "2026 Hires":   GREEN,
+        "2027 Hires":   TEAL,
+        "2028 Hires":   ORANGE,
+    }
 
+    # For each quarter, compute revenue contribution by cohort
+    qtr_rev_by_cohort = {k: [] for k in cohort_keys}
     hire_plan_rows = []
-    cumulative_reps = current_reps
-    for qi, qname in enumerate(quarters):
-        hired_this_q = hires_by_q[qi]
-        cumulative_reps += hired_this_q
-        # Revenue: current reps always contribute; new reps are ramping (50% in hire Q, 100% after)
-        ramped_new = sum(
-            hires_by_q[j] * (1.0 if qi > j + (ramp_months // 3) else 0.5)
-            for j in range(qi + 1)
-        )
-        proj_q_rev = (current_reps * eff_rev_per_rep / 4) + (ramped_new * eff_rev_per_rep / 4)
-        gap_to_tgt = max(0, target_rev_dollars - proj_q_rev * 4)   # annualised gap
+    cumulative_reps_count = current_reps
+
+    for qi in range(12):
+        yr = yr_for_q[qi]
+        yr_tgt = year_targets[yr]
+
+        # Current team
+        curr_q = current_reps * eff_rev_per_rep / 4
+        qtr_rev_by_cohort["Current Team"].append(curr_q)
+
+        # New hire cohorts — hires_by_q[j] reps hired in quarter j
+        for cohort, start_q in cohort_hire_start_q.items():
+            contrib = 0.0
+            for j in range(start_q, min(start_q + 4, qi + 1)):
+                qtrs_since = qi - j
+                if qtrs_since == 0:
+                    ramp_pct = 0.5
+                elif qtrs_since < ramp_qtrs:
+                    ramp_pct = 0.5 + 0.5 * (qtrs_since / ramp_qtrs)
+                else:
+                    ramp_pct = 1.0
+                contrib += hires_by_q[j] * eff_rev_per_rep / 4 * ramp_pct
+            qtr_rev_by_cohort[cohort].append(contrib)
+
+        total_q = sum(v[qi] for v in qtr_rev_by_cohort.values())
+        cumulative_reps_count += hires_by_q[qi]
+
         hire_plan_rows.append({
-            "Quarter":           qname,
-            "Reps to Hire":      hired_this_q,
-            "Cumulative Reps":   cumulative_reps,
-            "Projected Revenue": proj_q_rev,
-            "Ann. Run Rate":     proj_q_rev * 4,
-            "Gap to Target":     gap_to_tgt,
+            "Quarter":         quarters_12[qi],
+            "Year Target":     fmt_usd(yr_tgt),
+            "Reps to Hire":    hires_by_q[qi],
+            "Cumul. Reps":     cumulative_reps_count,
+            "Proj. Qtr Rev":   total_q,
+            "Ann. Run Rate":   total_q * 4,
+            "Gap to Yr Target": max(0, yr_tgt - total_q * 4),
         })
 
     plan_df = pd.DataFrame(hire_plan_rows)
 
-    # Monthly version for line chart (24 months)
-    months_24   = list(range(1, 25))
-    month_names = []
-    start_m     = 1   # Jan 2026 = month 1
-    for mo in months_24:
-        yr  = 2026 + (mo - 1) // 12
-        mon = ((mo - 1) % 12) + 1
-        month_names.append(f"{date(yr, mon, 1).strftime('%b %Y')}")
-
-    monthly_rev = []
-    monthly_cohort = {f"Current Team": [], f"Q1 Hires": [], f"Q2 Hires": [],
-                      f"Q3 Hires": [], f"Q4 Hires": []}
-
-    for mo in months_24:
-        # Current team (fully ramped from day 1)
-        curr_contrib = current_reps * eff_rev_per_rep / 12
-
-        new_contribs = {}
-        for qi in range(4):
-            hire_mo_start = (qi * 3) + 1        # Q1=mo1, Q2=mo4, Q3=mo7, Q4=mo10
-            months_since_hire = mo - hire_mo_start
-            ramp_progress = min(1.0, max(0.0, months_since_hire / ramp_months)) if months_since_hire >= 0 else 0.0
-            label = f"Q{qi+1} Hires"
-            new_contribs[label] = hires_by_q[qi] * eff_rev_per_rep / 12 * ramp_progress
-
-        total_mo = curr_contrib + sum(new_contribs.values())
-        monthly_rev.append(total_mo)
-        monthly_cohort["Current Team"].append(curr_contrib)
-        for k, v in new_contribs.items():
-            monthly_cohort[k].append(v)
-
-    # ── Row 1: Revenue Growth Curve  |  Cohort Bar ────────────────────────────
+    # ── Row 1: Growth Curve  |  Cohort Bar ────────────────────────────────────
     ch1, ch2 = st.columns(2)
 
     with ch1:
+        qtr_totals = [sum(qtr_rev_by_cohort[k][qi] for k in cohort_keys) / 1e6
+                      for qi in range(12)]
         fig_growth = go.Figure()
-        cumulative_run = [r * 12 for r in monthly_rev]   # annualised for readability
         fig_growth.add_trace(go.Scatter(
-            x=month_names, y=[r / 1e6 for r in monthly_rev],
-            name="Monthly Revenue",
-            line=dict(color=BLUE, width=2.5),
+            x=quarters_12, y=qtr_totals,
+            name="Quarterly Revenue",
+            line=dict(color=BLUE, width=2.8),
             fill="tozeroy", fillcolor="rgba(33,150,243,0.10)",
-            hovertemplate="<b>%{x}</b><br>Monthly Rev: $%{y:.3f}M<extra></extra>",
+            mode="lines+markers", marker=dict(size=5, color=BLUE),
+            hovertemplate="<b>%{x}</b><br>Qtr Rev: $%{y:.2f}M<extra></extra>",
         ))
-        # Target line (monthly equivalent)
-        target_monthly_m = target_rev_dollars / 12 / 1e6
-        fig_growth.add_hline(
-            y=target_monthly_m,
-            line_dash="dash", line_color=GREEN, line_width=1.5,
-            annotation_text=f"Target/mo ${target_monthly_m:.2f}M",
-            annotation_font_color=GREEN,
-        )
-        fig_growth.update_yaxes(tickprefix="$", ticksuffix="M", tickformat=".2f")
-        fig_growth.update_xaxes(tickangle=-40, tickmode="array",
-                                 tickvals=month_names[::3], ticktext=month_names[::3])
-        base_layout(fig_growth, title="Revenue Growth Curve — 24 Months")
+        fig_growth.update_yaxes(tickprefix="$", ticksuffix="M", tickformat=".1f")
+        fig_growth.update_xaxes(tickangle=-40)
+        base_layout(fig_growth, title="Quarterly Revenue Growth — 2026–2028", legend=False)
         st.plotly_chart(fig_growth, use_container_width=True, config=CHART_CFG)
 
     with ch2:
-        # Quarterly cohort contribution bar
-        qtr_names = [r["Quarter"] for r in hire_plan_rows]
-        cohort_colors = {"Current Team": BLUE, "Q1 Hires": GREEN,
-                         "Q2 Hires": TEAL, "Q3 Hires": ORANGE, "Q4 Hires": PURPLE}
         fig_cohort = go.Figure()
-
-        for cohort_name, mo_vals in monthly_cohort.items():
-            # Aggregate to quarterly (groups of 3 months)
-            q_vals = [sum(mo_vals[q*3:(q+1)*3]) / 1e6 for q in range(8)]
+        for cohort in cohort_keys:
+            vals = [v / 1e6 for v in qtr_rev_by_cohort[cohort]]
             fig_cohort.add_trace(go.Bar(
-                name=cohort_name,
-                x=quarters,
-                y=q_vals,
-                marker_color=cohort_colors.get(cohort_name, PURPLE),
-                marker_opacity=0.85,
-                hovertemplate=f"<b>%{{x}}</b><br>{cohort_name}: $%{{y:.2f}}M<extra></extra>",
+                name=cohort, x=quarters_12, y=vals,
+                marker_color=cohort_colors_map[cohort], marker_opacity=0.85,
+                hovertemplate=f"<b>%{{x}}</b><br>{cohort}: $%{{y:.2f}}M<extra></extra>",
             ))
-
         fig_cohort.update_layout(barmode="stack")
-        fig_cohort.update_yaxes(tickprefix="$", ticksuffix="M", tickformat=".2f")
-        base_layout(fig_cohort, title="Revenue by Rep Cohort (Quarterly)")
+        fig_cohort.update_yaxes(tickprefix="$", ticksuffix="M", tickformat=".1f")
+        fig_cohort.update_xaxes(tickangle=-40)
+        base_layout(fig_cohort, title="Revenue by Rep Cohort — 2026–2028")
         st.plotly_chart(fig_cohort, use_container_width=True, config=CHART_CFG)
 
     section_divider()
 
     # ── Hiring Plan Table ──────────────────────────────────────────────────────
-    st.markdown('<div class="chart-label">Hiring Plan by Quarter</div>', unsafe_allow_html=True)
+    st.markdown('<div class="chart-label">3-Year Hiring Plan by Quarter</div>', unsafe_allow_html=True)
 
     disp_plan = plan_df.copy()
-    disp_plan["Projected Revenue"] = disp_plan["Projected Revenue"].map(lambda v: f"${v/1e6:.3f}M")
-    disp_plan["Ann. Run Rate"]     = disp_plan["Ann. Run Rate"].map(lambda v: f"${v/1e6:.2f}M")
-    disp_plan["Gap to Target"]     = disp_plan["Gap to Target"].map(
-        lambda v: "✅ On Target" if v == 0 else f"${v/1e6:.2f}M"
+    disp_plan["Proj. Qtr Rev"]    = disp_plan["Proj. Qtr Rev"].map(lambda v: f"${v/1e6:.2f}M")
+    disp_plan["Ann. Run Rate"]    = disp_plan["Ann. Run Rate"].map(lambda v: f"${v/1e6:.2f}M")
+    disp_plan["Gap to Yr Target"] = disp_plan["Gap to Yr Target"].map(
+        lambda v: "✅ On Target" if v < 1_000 else f"${v/1e6:.2f}M"
     )
 
     st.dataframe(
@@ -1445,11 +1401,12 @@ elif "LRP" in page:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Quarter":           st.column_config.TextColumn("Quarter",              width="small"),
-            "Reps to Hire":      st.column_config.NumberColumn("Reps to Hire",       width="small"),
-            "Cumulative Reps":   st.column_config.NumberColumn("Cumulative Reps",    width="small"),
-            "Projected Revenue": st.column_config.TextColumn("Projected Rev (Qtr)", width="medium"),
-            "Ann. Run Rate":     st.column_config.TextColumn("Ann. Run Rate",        width="medium"),
-            "Gap to Target":     st.column_config.TextColumn("Gap to Target",        width="medium"),
+            "Quarter":         st.column_config.TextColumn("Quarter",          width="small"),
+            "Year Target":     st.column_config.TextColumn("Year Target",      width="small"),
+            "Reps to Hire":    st.column_config.NumberColumn("Hire This Qtr",  width="small"),
+            "Cumul. Reps":     st.column_config.NumberColumn("Cumul. Reps",    width="small"),
+            "Proj. Qtr Rev":   st.column_config.TextColumn("Proj. Qtr Rev",   width="medium"),
+            "Ann. Run Rate":   st.column_config.TextColumn("Ann. Run Rate",   width="medium"),
+            "Gap to Yr Target":st.column_config.TextColumn("Gap to Yr Target",width="medium"),
         },
     )
