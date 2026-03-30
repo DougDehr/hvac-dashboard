@@ -23,7 +23,7 @@ st.markdown("""
     border-right: 1px solid #21262D;
   }
   /* Remove default top padding */
-  .block-container { padding-top: 24px !important; }
+  .block-container { padding-top: 48px !important; }
 
   /* Sidebar nav radio — make it look like a nav menu */
   [data-testid="stRadio"] > div { gap: 2px !important; }
