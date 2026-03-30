@@ -226,12 +226,12 @@ def generate_data():
     actual_months   = pd.date_range("2025-01-01", "2026-03-01", freq="MS")
     forecast_months = pd.date_range("2026-04-01", "2026-12-01", freq="MS")
 
-    # Seasonal multipliers (0=Jan … 11=Dec)
+    # Seasonal multipliers (0=Jan … 11=Dec) — summer peak for upstate NY cooling demand
     seasons = {
-        "Education":          [1.10, 1.00, 1.15, 1.20, 1.10, 0.55, 0.35, 0.45, 1.35, 1.45, 1.20, 0.85],
-        "Office":             [1.00, 0.95, 1.10, 1.22, 1.12, 0.60, 0.45, 0.55, 1.28, 1.32, 1.15, 0.80],
-        "Restaurant":         [0.95, 0.90, 1.00, 1.05, 1.12, 1.18, 1.22, 1.18, 1.06, 1.00, 0.94, 0.94],
-        "Chip/Semiconductor": [1.00, 0.75, 1.55, 0.65, 1.20, 0.88, 1.10, 1.35, 0.78, 1.62, 1.00, 0.88],
+        "Education":          [1.10, 1.00, 1.15, 1.15, 1.30, 1.50, 1.45, 1.32, 1.10, 0.85, 0.75, 0.78],
+        "Office":             [1.00, 0.95, 1.10, 1.20, 1.35, 1.50, 1.48, 1.35, 1.15, 0.90, 0.80, 0.78],
+        "Restaurant":         [0.95, 0.90, 1.00, 1.08, 1.15, 1.22, 1.28, 1.22, 1.10, 1.00, 0.94, 0.94],
+        "Chip/Semiconductor": [1.00, 0.75, 1.55, 1.10, 1.30, 1.52, 1.58, 1.42, 1.15, 0.88, 0.82, 0.88],
     }
     # Actual bases — calibrated so Jan-Mar 2026 ≈ $6 M
     bases_act  = {"Education": 403_000, "Office": 490_000,
