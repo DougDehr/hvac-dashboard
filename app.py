@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import plotly.express as px
 from datetime import date, timedelta
 import random
 
@@ -332,6 +333,10 @@ if "drill_seg" not in st.session_state:
     st.session_state.drill_seg = None
 if "active_kpi" not in st.session_state:
     st.session_state.active_kpi = None
+if "estimates" not in st.session_state:
+    st.session_state.estimates = []
+if "show_weather" not in st.session_state:
+    st.session_state.show_weather = False
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -351,7 +356,7 @@ with st.sidebar:
     st.markdown('<span class="sidebar-section-label">Navigation</span>', unsafe_allow_html=True)
     page = st.radio(
         "nav",
-        ["📈  Sales", "💰  Finance", "🏢  Segments", "📋  Jobs", "📊  LRP"],
+        ["📈  Sales", "💰  Finance", "🏢  Segments", "📋  Jobs", "📊  LRP", "🔀  Pipeline", "🗺️  Territory"],
         label_visibility="collapsed",
     )
 
@@ -769,12 +774,20 @@ if "Sales" in page:
 
     with r1:
         # Always show full-year 2026: actuals (Jan–Mar) solid + forecast (Apr–Dec) dashed
+        show_weather = st.checkbox("🌡️ Temperature overlay", value=st.session_state.show_weather, key="wx_toggle")
+        st.session_state.show_weather = show_weather
+
         yr2026 = monthly_df[monthly_df["date"].dt.year == 2026].copy()
         yr2026["seg_rev"] = yr2026[rev_cols].sum(axis=1)
         act_26  = yr2026[yr2026["is_forecast"] == False]
         fcst_26 = yr2026[yr2026["is_forecast"] == True]
         # Include last actual in forecast trace so lines connect
         fcst_conn = pd.concat([act_26.tail(1), fcst_26])
+
+        # Monthly avg temp °F for 2026 (seasonal curve, peaks ~90°F in July)
+        def _temp_f(month_num):
+            return 57 + 38 * np.sin((month_num - 1 - 2) * np.pi / 6)
+        yr2026["temp_f"] = yr2026["date"].dt.month.map(_temp_f)
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(
@@ -797,11 +810,36 @@ if "Sales" in page:
         fig.add_annotation(x="Mar 2026", y=1.04, yref="paper", xref="x",
                            text="← Actual | Forecast →", showarrow=False,
                            font=dict(color="#8B949E", size=10), xanchor="center")
+        if show_weather:
+            fig.add_trace(go.Scatter(
+                x=yr2026["month_label"], y=yr2026["temp_f"],
+                name="Avg Temp °F",
+                line=dict(color=ORANGE, width=1.5, dash="dot"),
+                fill="tozeroy", fillcolor="rgba(255,152,0,0.06)",
+                yaxis="y2",
+                hovertemplate="<b>%{x}</b><br>Avg Temp: %{y:.0f}°F<extra></extra>",
+            ))
+            # Correlation between actual rev and temp
+            act_temp = yr2026[yr2026["is_forecast"] == False]["temp_f"].values
+            act_rev_vals = act_26["seg_rev"].values
+            if len(act_temp) > 1:
+                corr = np.corrcoef(act_rev_vals, act_temp)[0, 1] * 100
+            else:
+                corr = 0
+            fig.update_layout(
+                yaxis2=dict(title="°F", overlaying="y", side="right",
+                            showgrid=False, tickfont=dict(color=ORANGE, size=10),
+                            range=[0, 120]),
+            )
+
         fig.update_yaxes(tickprefix="$", tickformat=",.0f")
         fig.update_xaxes(tickangle=-40)
         total_fcst_rev = yr2026["seg_rev"].sum()
-        base_layout(fig, title=f"2026 Monthly Revenue — Actuals vs Forecast  (FY est. {fmt_usd(total_fcst_rev)})")
+        wx_note = "  🌡️ +temp" if show_weather else ""
+        base_layout(fig, title=f"2026 Monthly Revenue — Actuals vs Forecast  (FY est. {fmt_usd(total_fcst_rev)}){wx_note}")
         st.plotly_chart(fig, use_container_width=True, config=CHART_CFG)
+        if show_weather:
+            st.caption(f"📊 Revenue correlates **{corr:.0f}%** with avg monthly temperature (actuals only)")
 
     with r2:
         sdf = seg_summary(fdf)
@@ -866,6 +904,131 @@ if "Sales" in page:
 
     st.markdown('<div class="chart-label">Recent Deals</div>', unsafe_allow_html=True)
     render_deals_table(fdeal, max_rows=25)
+
+    section_divider()
+    st.markdown('<div class="chart-title" style="color:#C9D1D9;font-size:13px;font-weight:600;margin-bottom:8px">Seasonal Forecast — Next 90 Days</div>', unsafe_allow_html=True)
+
+    # Use last 15 months of actuals to project Apr/May/Jun 2026
+    hist = monthly_df[monthly_df["is_forecast"] == False].copy()
+    hist["seg_rev"] = hist[rev_cols].sum(axis=1)
+
+    # Simple seasonal projection: same 3 months from prior year × YoY growth rate
+    # Find Apr/May/Jun 2025 as baseline
+    prior = hist[hist["date"].dt.month.isin([4, 5, 6]) & (hist["date"].dt.year == 2025)]["seg_rev"].values
+    recent_3  = hist.tail(3)["seg_rev"].mean()
+    prior_3   = hist[hist["date"].dt.month.isin([1, 2, 3]) & (hist["date"].dt.year == 2025)]["seg_rev"].mean()
+    yoy_growth = recent_3 / prior_3 if prior_3 else 1.1
+
+    forecast_months_90 = ["Apr 2026", "May 2026", "Jun 2026"]
+    forecast_vals = prior * yoy_growth if len(prior) == 3 else np.array([recent_3 * 1.05, recent_3 * 1.08, recent_3 * 0.95])
+    conf_upper = forecast_vals * 1.12
+    conf_lower = forecast_vals * 0.88
+
+    # KPI cards: 30/60/90 day projections
+    f1, f2, f3 = st.columns(3)
+    for col, lbl, val, acc in [
+        (f1, "Next 30 Days",  forecast_vals[0],   BLUE),
+        (f2, "Next 60 Days",  forecast_vals[:2].sum(), TEAL),
+        (f3, "Next 90 Days",  forecast_vals.sum(), GREEN),
+    ]:
+        with col:
+            st.markdown(kpi_card(lbl, fmt_usd(val), "projected", True, acc), unsafe_allow_html=True)
+
+    st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
+
+    # Build chart: last 6 months actual + 3 month forecast with confidence band
+    hist_tail = hist.tail(6)
+    connector_label = hist_tail.iloc[-1]["month_label"]
+    connector_val   = hist_tail.iloc[-1]["seg_rev"]
+
+    fig_fc = go.Figure()
+    # Confidence band (filled area)
+    fig_fc.add_trace(go.Scatter(
+        x=forecast_months_90 + forecast_months_90[::-1],
+        y=list(conf_upper) + list(conf_lower[::-1]),
+        fill="toself", fillcolor="rgba(76,175,80,0.12)",
+        line=dict(color="rgba(0,0,0,0)"),
+        name="90% Confidence", showlegend=True,
+        hoverinfo="skip",
+    ))
+    # Historical actuals
+    fig_fc.add_trace(go.Scatter(
+        x=hist_tail["month_label"], y=hist_tail["seg_rev"],
+        name="Actual", line=dict(color=BLUE, width=2.5),
+        hovertemplate="<b>%{x}</b><br>Actual: $%{y:,.0f}<extra></extra>",
+    ))
+    # Forecast (connect from last actual)
+    fig_fc.add_trace(go.Scatter(
+        x=[connector_label] + forecast_months_90,
+        y=[connector_val] + list(forecast_vals),
+        name="Forecast", line=dict(color=GREEN, width=2.2, dash="dash"),
+        hovertemplate="<b>%{x}</b><br>Forecast: $%{y:,.0f}<extra></extra>",
+    ))
+    fig_fc.update_yaxes(tickprefix="$", tickformat=",.0f")
+    base_layout(fig_fc, height=320, title="90-Day Seasonal Revenue Forecast")
+    st.plotly_chart(fig_fc, use_container_width=True, config=CHART_CFG)
+
+    section_divider()
+    st.markdown('<div class="chart-title" style="color:#C9D1D9;font-size:13px;font-weight:600;margin-bottom:8px">Sales Rep Leaderboard — Q1 2026</div>', unsafe_allow_html=True)
+
+    # Mock rep data (consistent seed)
+    np.random.seed(99)
+    rep_names    = ["Jordan Mills", "Taylor Chen", "Sam Rivera", "Alex Park", "Casey Brooks", "Morgan Lee"]
+    seg_focus    = ["Chip/Semi", "Education", "Office", "Restaurant", "Education", "Chip/Semi"]
+    rep_quotas   = [520_000] * 6
+    rep_revenues = np.random.uniform(0.55, 1.30, 6) * 520_000
+    rep_deals    = np.random.randint(4, 18, 6)
+    rep_attain   = rep_revenues / np.array(rep_quotas) * 100
+
+    # Sort by attainment desc
+    order = np.argsort(rep_attain)[::-1]
+
+    def attain_color(pct):
+        return GREEN if pct >= 90 else (ORANGE if pct >= 70 else RED)
+
+    # Trend sparkline (6 months of mock data per rep)
+    rep_trends = [np.random.uniform(0.7, 1.3, 6) * rep_revenues[i] / 6 for i in range(6)]
+
+    rows = []
+    for rank, i in enumerate(order):
+        trophy = "🏆 " if rank == 0 else f"{rank+1}. "
+        rows.append({
+            "Rep":          trophy + rep_names[i],
+            "Segment":      seg_focus[i],
+            "Deals":        int(rep_deals[i]),
+            "Revenue":      f"${rep_revenues[i]:,.0f}",
+            "Quota":        f"${rep_quotas[i]:,.0f}",
+            "Attainment":   f"{rep_attain[i]:.0f}%",
+        })
+
+    lb_df = pd.DataFrame(rows)
+    st.dataframe(lb_df, use_container_width=True, hide_index=True,
+                 column_config={
+                     "Rep":       st.column_config.TextColumn("Rep",       width="medium"),
+                     "Segment":   st.column_config.TextColumn("Segment",   width="small"),
+                     "Deals":     st.column_config.NumberColumn("Deals",   width="small"),
+                     "Revenue":   st.column_config.TextColumn("Revenue",   width="medium"),
+                     "Quota":     st.column_config.TextColumn("Quota",     width="medium"),
+                     "Attainment":st.column_config.TextColumn("Attainment",width="small"),
+                 })
+
+    st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
+
+    # Bar chart: revenue by rep with quota line
+    sorted_names = [("🏆 " if r == 0 else f"{r+1}. ") + rep_names[order[r]] for r in range(6)]
+    bar_colors   = [attain_color(rep_attain[i]) for i in order]
+    fig_lb = go.Figure()
+    fig_lb.add_trace(go.Bar(
+        x=sorted_names, y=rep_revenues[order],
+        marker_color=bar_colors, marker_opacity=0.85, name="Revenue",
+        hovertemplate="<b>%{x}</b><br>Revenue: $%{y:,.0f}<extra></extra>",
+    ))
+    fig_lb.add_hline(y=520_000, line_dash="dash", line_color="#8B949E", line_width=1.5,
+                     annotation_text="Quota $520K", annotation_position="top right",
+                     annotation_font=dict(color="#8B949E", size=10))
+    fig_lb.update_yaxes(tickprefix="$", tickformat=",.0f")
+    base_layout(fig_lb, height=300, legend=False, title="Revenue by Rep vs Quota")
+    st.plotly_chart(fig_lb, use_container_width=True, config=CHART_CFG)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -982,6 +1145,81 @@ elif "Finance" in page:
                      "Gross Profit": st.column_config.TextColumn("Gross Profit", width="medium"),
                      "Margin %":     st.column_config.TextColumn("Margin %",     width="small"),
                  })
+
+    section_divider()
+    with st.expander("⚖️ Break-Even Calculator", expanded=False):
+        be1, be2, be3 = st.columns(3)
+        with be1:
+            fixed_costs = st.number_input("Monthly Fixed Costs ($)", min_value=0, value=85_000, step=1_000)
+        with be2:
+            avg_job_rev = st.number_input("Avg Job Revenue ($)", min_value=1, value=12_500, step=500)
+        with be3:
+            avg_job_var = st.number_input("Avg Variable Cost / Job ($)", min_value=0, value=7_500, step=250)
+
+        contrib_margin = avg_job_rev - avg_job_var
+        if contrib_margin > 0:
+            be_jobs   = fixed_costs / contrib_margin
+            be_rev    = be_jobs * avg_job_rev
+            # Current monthly jobs (from fdeal approximation)
+            curr_mo_jobs = max(1, len(fdeal) / max(1, (end_date - start_date).days / 30))
+            curr_mo_rev  = fdeal["Value"].sum() / max(1, (end_date - start_date).days / 30)
+            margin_safety = (curr_mo_rev - be_rev) / curr_mo_rev * 100 if curr_mo_rev > 0 else 0
+        else:
+            be_jobs = be_rev = curr_mo_rev = margin_safety = 0
+
+        bc1, bc2, bc3 = st.columns(3)
+        ms_color = GREEN if margin_safety > 20 else (ORANGE if margin_safety > 0 else RED)
+        for col, lbl, val, acc in [
+            (bc1, "Break-Even Jobs/Mo",    f"{be_jobs:.1f}", BLUE),
+            (bc2, "Break-Even Revenue",    fmt_usd(be_rev), TEAL),
+            (bc3, "Margin of Safety",      f"{margin_safety:.1f}%", ms_color),
+        ]:
+            with col:
+                st.markdown(kpi_card(lbl, val, accent=acc), unsafe_allow_html=True)
+
+        st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
+
+        # Gauge chart
+        gauge_val = min(200, (curr_mo_rev / be_rev * 100) if be_rev > 0 else 0)
+        fig_gauge = go.Figure(go.Indicator(
+            mode="gauge+number+delta",
+            value=gauge_val,
+            delta={"reference": 100, "valueformat": ".0f"},
+            number={"suffix": "%", "valueformat": ".0f"},
+            title={"text": "Current Revenue vs Break-Even", "font": {"color": "#C9D1D9", "size": 13}},
+            gauge={
+                "axis": {"range": [0, 200], "tickcolor": "#8B949E"},
+                "bar":  {"color": GREEN if gauge_val >= 120 else (ORANGE if gauge_val >= 100 else RED)},
+                "bgcolor": CHART_BG,
+                "bordercolor": "#30363D",
+                "steps": [
+                    {"range": [0,   100], "color": "rgba(239,83,80,0.15)"},
+                    {"range": [100, 130], "color": "rgba(255,152,0,0.15)"},
+                    {"range": [130, 200], "color": "rgba(76,175,80,0.15)"},
+                ],
+                "threshold": {"line": {"color": "#E6EDF3", "width": 2}, "value": 100},
+            },
+        ))
+        fig_gauge.update_layout(
+            height=260, paper_bgcolor=PAPER_BG, font=dict(color="#C9D1D9"),
+            margin=dict(l=20, r=20, t=40, b=0),
+        )
+        st.plotly_chart(fig_gauge, use_container_width=True, config=CHART_CFG)
+
+        # What-if slider
+        st.markdown('<div style="color:#8B949E;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.7px;margin:12px 0 6px">What-If: Additional Fixed Costs</div>', unsafe_allow_html=True)
+        extra_fixed = st.slider("Additional monthly fixed costs", 0, 50_000, 0, 1_000, format="$%d")
+        new_be_jobs = (fixed_costs + extra_fixed) / contrib_margin if contrib_margin > 0 else 0
+        new_be_rev  = new_be_jobs * avg_job_rev
+        delta_jobs  = new_be_jobs - be_jobs
+        st.markdown(
+            f'<div style="background:rgba(255,152,0,0.08);border:1px solid rgba(255,152,0,0.3);'
+            f'border-radius:8px;padding:12px 16px;color:#C9D1D9;font-size:13px">'
+            f'Adding <strong style="color:{ORANGE}">{fmt_usd(extra_fixed)}/mo</strong> in fixed costs '
+            f'raises break-even to <strong style="color:{ORANGE}">{new_be_jobs:.1f} jobs</strong> '
+            f'({fmt_usd(new_be_rev)}/mo) — <strong>+{delta_jobs:.1f} more jobs</strong> required.</div>',
+            unsafe_allow_html=True,
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1173,6 +1411,54 @@ elif "Jobs" in page:
     )
 
     render_deals_table(jobs)
+
+    section_divider()
+    with st.expander("🧮 Job Costing Calculator", expanded=False):
+        jc1, jc2, jc3, jc4, jc5 = st.columns(5)
+        with jc1: labor_hours   = st.number_input("Labor Hours",     min_value=0.0, value=40.0,    step=1.0)
+        with jc2: hourly_rate   = st.number_input("Hourly Rate ($)", min_value=0.0, value=85.0,    step=5.0)
+        with jc3: materials     = st.number_input("Materials ($)",   min_value=0.0, value=3_500.0, step=100.0)
+        with jc4: overhead_pct  = st.number_input("Overhead %",      min_value=0.0, value=15.0,    step=1.0, max_value=100.0)
+        with jc5: markup_pct    = st.number_input("Markup %",        min_value=0.0, value=35.0,    step=1.0)
+
+        labor_cost    = labor_hours * hourly_rate
+        direct_cost   = labor_cost + materials
+        overhead_cost = direct_cost * (overhead_pct / 100)
+        total_cost    = direct_cost + overhead_cost
+        sale_price    = total_cost * (1 + markup_pct / 100)
+        gm_dollars    = sale_price - total_cost
+        gm_pct        = gm_dollars / sale_price * 100 if sale_price else 0
+        margin_color  = GREEN if gm_pct >= 40 else (ORANGE if gm_pct >= 25 else RED)
+
+        st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
+        oc1, oc2, oc3, oc4 = st.columns(4)
+        for col, lbl, val, acc in [
+            (oc1, "Total Cost",    fmt_usd(total_cost),  BLUE),
+            (oc2, "Sale Price",    fmt_usd(sale_price),  TEAL),
+            (oc3, "Gross Margin $", fmt_usd(gm_dollars), margin_color),
+            (oc4, "Gross Margin %", f"{gm_pct:.1f}%",    margin_color),
+        ]:
+            with col:
+                st.markdown(kpi_card(lbl, val, accent=acc), unsafe_allow_html=True)
+
+        st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
+        cust_name_input = st.text_input("Customer / Job Name (optional)", placeholder="e.g. Pico Semiconductor — Chiller Install")
+        if st.button("💾 Save Estimate", use_container_width=False):
+            st.session_state.estimates.append({
+                "Job":         cust_name_input or f"Estimate #{len(st.session_state.estimates)+1}",
+                "Labor":       fmt_usd(labor_cost),
+                "Materials":   fmt_usd(materials),
+                "Total Cost":  fmt_usd(total_cost),
+                "Sale Price":  fmt_usd(sale_price),
+                "GM $":        fmt_usd(gm_dollars),
+                "GM %":        f"{gm_pct:.1f}%",
+            })
+            st.success("Estimate saved!")
+
+        if st.session_state.estimates:
+            st.markdown("<div style='margin-top:12px;color:#8B949E;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.7px'>Saved Estimates</div>", unsafe_allow_html=True)
+            est_df = pd.DataFrame(st.session_state.estimates)
+            st.dataframe(est_df, use_container_width=True, hide_index=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1410,3 +1696,246 @@ elif "LRP" in page:
             "Gap to Yr Target":st.column_config.TextColumn("Gap to Yr Target",width="medium"),
         },
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: PIPELINE TRACKER
+# ══════════════════════════════════════════════════════════════════════════════
+elif "Pipeline" in page:
+    page_header("Proposal Pipeline Tracker")
+
+    # Mock pipeline deals with stages
+    np.random.seed(77)
+    random.seed(77)
+    pipe_customers = [
+        ("Lakeside Unified School", "Education"), ("TechCore Offices", "Office"),
+        ("NanoFab Systems", "Chip/Semiconductor"), ("Harbor Bistro Group", "Restaurant"),
+        ("Valley College", "Education"), ("Summit Business Park", "Office"),
+        ("FusionChip Labs", "Chip/Semiconductor"), ("Metro Eats", "Restaurant"),
+        ("Coastal High School", "Education"), ("Pinnacle Tower", "Office"),
+        ("QuantumWafer Inc", "Chip/Semiconductor"), ("Sunrise Diner Chain", "Restaurant"),
+        ("Ridgeline Corp Center", "Office"), ("Pacific Semiconductor", "Chip/Semiconductor"),
+        ("Eastside School Dist.", "Education"), ("The Noodle House", "Restaurant"),
+        ("Skyline Office Park", "Office"), ("BlueChip Fab", "Chip/Semiconductor"),
+        ("North County Schools", "Education"), ("Bayside Grill", "Restaurant"),
+        ("Harborview Suites", "Office"), ("Apex Circuit Co.", "Chip/Semiconductor"),
+        ("Greenfield Academy", "Education"), ("Fusion Kitchen", "Restaurant"),
+        ("Corporate Commons", "Office"), ("Wafer Tech Corp", "Chip/Semiconductor"),
+        ("Sunrise Elem District", "Education"), ("Seaside Cafe Group", "Restaurant"),
+        ("Innovation Plaza", "Office"), ("SilicaCore Mfg", "Chip/Semiconductor"),
+    ]
+    stages      = ["Prospect", "Proposal Sent", "Follow Up", "Closed Won", "Closed Lost"]
+    stage_pool  = ["Prospect"]*8 + ["Proposal Sent"]*9 + ["Follow Up"]*7 + ["Closed Won"]*4 + ["Closed Lost"]*2
+    val_range   = {"Chip/Semiconductor":(180_000,950_000),"Education":(45_000,285_000),
+                   "Office":(32_000,220_000),"Restaurant":(8_000,72_000)}
+
+    pipe_deals_all = []
+    for i, (cust, seg) in enumerate(pipe_customers):
+        lo, hi = val_range[seg]
+        stage = stage_pool[i % len(stage_pool)]
+        days_in = random.randint(1, 45)
+        pipe_deals_all.append({
+            "Customer": cust, "Segment": seg,
+            "Value": random.randint(lo, hi),
+            "Stage": stage,
+            "Days in Stage": days_in,
+        })
+    pipe_df = pd.DataFrame(pipe_deals_all)
+
+    # KPI cards
+    total_pipe_val   = pipe_df[pipe_df["Stage"].isin(["Prospect","Proposal Sent","Follow Up"])]["Value"].sum()
+    avg_days_close   = 38  # mock
+    conv_rate        = len(pipe_df[pipe_df["Stage"]=="Closed Won"]) / len(pipe_df) * 100
+    prop_this_month  = len(pipe_df[pipe_df["Stage"]=="Proposal Sent"])
+
+    pk1, pk2, pk3, pk4 = st.columns(4)
+    for col, lbl, val, delta, pos, acc in [
+        (pk1, "Total Pipeline Value",   fmt_usd(total_pipe_val), f"{len(pipe_df)} deals",         True, BLUE),
+        (pk2, "Avg Days to Close",      f"{avg_days_close}d",    "−3d vs last quarter",           True, TEAL),
+        (pk3, "Conversion Rate",        f"{conv_rate:.0f}%",     "vs 55% target",   conv_rate>=55, GREEN if conv_rate>=55 else ORANGE),
+        (pk4, "Proposals This Month",   str(prop_this_month),    "active proposals",              True, ORANGE),
+    ]:
+        with col:
+            st.markdown(kpi_card(lbl, val, delta, pos, acc), unsafe_allow_html=True)
+
+    st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+
+    # Funnel chart
+    kf1, kf2 = st.columns([1, 1])
+    with kf1:
+        stage_counts = pipe_df["Stage"].value_counts()
+        funnel_stages = ["Prospect", "Proposal Sent", "Follow Up", "Closed Won"]
+        funnel_vals   = [stage_counts.get(s, 0) for s in funnel_stages]
+        funnel_vals_usd = [pipe_df[pipe_df["Stage"]==s]["Value"].sum() for s in funnel_stages]
+        fig_funnel = go.Figure(go.Funnel(
+            y=funnel_stages, x=funnel_vals,
+            textinfo="value+percent initial",
+            marker=dict(color=[BLUE, TEAL, ORANGE, GREEN]),
+            textfont=dict(color="#E6EDF3"),
+            connector=dict(line=dict(color="#30363D", width=1)),
+        ))
+        base_layout(fig_funnel, height=320, legend=False, title="Pipeline Funnel — Deal Count")
+        st.plotly_chart(fig_funnel, use_container_width=True, config=CHART_CFG)
+
+    with kf2:
+        fig_funnel2 = go.Figure(go.Funnel(
+            y=funnel_stages, x=[v/1e6 for v in funnel_vals_usd],
+            textinfo="value+percent initial",
+            texttemplate="%{value:.1f}M (%{percentInitial})",
+            marker=dict(color=[BLUE, TEAL, ORANGE, GREEN]),
+            textfont=dict(color="#E6EDF3"),
+            connector=dict(line=dict(color="#30363D", width=1)),
+        ))
+        base_layout(fig_funnel2, height=320, legend=False, title="Pipeline Funnel — $ Value ($M)")
+        st.plotly_chart(fig_funnel2, use_container_width=True, config=CHART_CFG)
+
+    section_divider()
+
+    # Kanban board
+    st.markdown('<div style="color:#C9D1D9;font-size:13px;font-weight:600;margin-bottom:12px">Pipeline Board</div>', unsafe_allow_html=True)
+    kanban_stages = ["Prospect", "Proposal Sent", "Follow Up", "Closed Won"]
+    kcols = st.columns(4)
+
+    for col_idx, stage in enumerate(kanban_stages):
+        stage_deals = pipe_df[pipe_df["Stage"] == stage].head(6)
+        with kcols[col_idx]:
+            stage_total = stage_deals["Value"].sum()
+            st.markdown(
+                f'<div style="background:#161B22;border:1px solid #30363D;border-radius:8px;'
+                f'padding:10px 12px;margin-bottom:8px">'
+                f'<div style="color:#8B949E;font-size:10px;font-weight:700;text-transform:uppercase;'
+                f'letter-spacing:.8px">{stage}</div>'
+                f'<div style="color:#E6EDF3;font-size:14px;font-weight:700;margin-top:2px">'
+                f'{fmt_usd(stage_total)}</div></div>',
+                unsafe_allow_html=True,
+            )
+            for _, deal in stage_deals.iterrows():
+                seg_c = SEG_COLOR.get(deal["Segment"], BLUE)
+                r_hex, g_hex, b_hex = int(seg_c[1:3],16), int(seg_c[3:5],16), int(seg_c[5:7],16)
+                st.markdown(
+                    f'<div style="background:linear-gradient(135deg,#161B22,#1C2333);'
+                    f'border:1px solid #30363D;border-left:3px solid {seg_c};'
+                    f'border-radius:8px;padding:10px 12px;margin-bottom:6px">'
+                    f'<div style="color:#E6EDF3;font-size:12px;font-weight:600;'
+                    f'margin-bottom:4px">{deal["Customer"]}</div>'
+                    f'<div style="color:{seg_c};font-size:10px;font-weight:600;'
+                    f'margin-bottom:6px">{deal["Segment"]}</div>'
+                    f'<div style="display:flex;justify-content:space-between">'
+                    f'<span style="color:#E6EDF3;font-size:13px;font-weight:700">'
+                    f'${deal["Value"]:,.0f}</span>'
+                    f'<span style="color:#8B949E;font-size:10px">'
+                    f'{deal["Days in Stage"]}d</span></div></div>',
+                    unsafe_allow_html=True,
+                )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: TERRITORY MAP
+# ══════════════════════════════════════════════════════════════════════════════
+elif "Territory" in page:
+    page_header("Service Territory Map")
+
+    # Mock job locations around San Jose, CA (lat 37.3382, lon -121.8863)
+    np.random.seed(55)
+    random.seed(55)
+
+    territory_customers = [
+        ("Pico Semiconductor",          "Chip/Semiconductor", 37.3875, -121.9730),
+        ("NovaTech Fabrication",        "Chip/Semiconductor", 37.4419, -122.1430),
+        ("SiliconCore Systems",         "Chip/Semiconductor", 37.3230, -121.9940),
+        ("Apex Wafer Technologies",     "Chip/Semiconductor", 37.5485, -121.9886),
+        ("Riverside Unified",           "Education",          37.2707, -121.8670),
+        ("Sunnyvale Community College", "Education",          37.3688, -122.0363),
+        ("Oakwood High School",         "Education",          37.2939, -121.9277),
+        ("Mesa Elementary District",    "Education",          37.2519, -121.8020),
+        ("Valley Technical Institute",  "Education",          37.4133, -121.9925),
+        ("Northgate Office Plaza",      "Office",             37.3861, -121.9734),
+        ("Centennial Tower",            "Office",             37.3382, -121.8863),
+        ("Harbor Business Park",        "Office",             37.3075, -121.9010),
+        ("Westside Corporate Center",   "Office",             37.3220, -122.0314),
+        ("Downtown Financial Suites",   "Office",             37.3348, -121.8896),
+        ("Innovation Plaza",            "Office",             37.4030, -121.9500),
+        ("The Burger Collective",       "Restaurant",         37.3500, -121.9100),
+        ("Golden Gate Bistro",          "Restaurant",         37.3612, -121.8990),
+        ("Pacific Rim Dining",          "Restaurant",         37.3150, -121.9350),
+        ("Sunset Grill Chain",          "Restaurant",         37.2800, -121.8750),
+        ("Harbor View Kitchen",         "Restaurant",         37.3700, -121.9200),
+        ("FusionChip Labs",             "Chip/Semiconductor", 37.4750, -121.9280),
+        ("Valley College",              "Education",          37.3980, -122.0600),
+        ("Summit Business Park",        "Office",             37.4200, -121.9100),
+        ("Metro Eats",                  "Restaurant",         37.3380, -121.9400),
+        ("Coastal High School",         "Education",          37.2500, -121.9100),
+        ("Pinnacle Tower",              "Office",             37.3650, -121.9650),
+        ("QuantumWafer Inc",            "Chip/Semiconductor", 37.5200, -122.0100),
+        ("Sunrise Diner Chain",         "Restaurant",         37.2950, -121.8100),
+        ("Ridgeline Corp Center",       "Office",             37.3100, -121.8600),
+        ("BlueChip Fab",                "Chip/Semiconductor", 37.4580, -121.9050),
+    ]
+
+    map_records = []
+    val_range_t = {"Chip/Semiconductor":(180_000,950_000),"Education":(45_000,285_000),
+                   "Office":(32_000,220_000),"Restaurant":(8_000,72_000)}
+    for cust, seg, lat, lon in territory_customers:
+        lo, hi = val_range_t[seg]
+        val = random.randint(lo, hi)
+        map_records.append({"Customer": cust, "Segment": seg,
+                             "lat": lat + np.random.uniform(-0.008, 0.008),
+                             "lon": lon + np.random.uniform(-0.008, 0.008),
+                             "Value": val})
+    map_df = pd.DataFrame(map_records)
+
+    # Filter by active_segs
+    map_df_f = map_df[map_df["Segment"].isin(active_segs)]
+
+    # KPI cards
+    jobs_by_seg = map_df_f.groupby("Segment")["Value"].count()
+    mk1, mk2, mk3, mk4 = st.columns(4)
+    for col, lbl, val, delta, pos, acc in [
+        (mk1, "Total Job Sites",     str(len(map_df_f)),          "in territory",               True, BLUE),
+        (mk2, "Territory Revenue",   fmt_usd(map_df_f["Value"].sum()), "+11% vs prior year",    True, GREEN),
+        (mk3, "Avg Travel Time",     "28 min",                    "mock estimate",               True, TEAL),
+        (mk4, "Revenue Density",     fmt_usd(map_df_f["Value"].sum() / max(1, len(map_df_f))), "per site", True, ORANGE),
+    ]:
+        with col:
+            st.markdown(kpi_card(lbl, val, delta, pos, acc), unsafe_allow_html=True)
+
+    st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+
+    # Map
+    map_df_f = map_df_f.copy()
+    map_df_f["Value_K"] = map_df_f["Value"] / 1000
+    map_df_f["Label"]   = map_df_f["Customer"] + "<br>$" + map_df_f["Value"].map(lambda v: f"{v:,.0f}")
+    color_map = {"Education": BLUE, "Office": TEAL, "Restaurant": GREEN, "Chip/Semiconductor": ORANGE}
+
+    fig_map = px.scatter_mapbox(
+        map_df_f, lat="lat", lon="lon",
+        color="Segment",
+        color_discrete_map=color_map,
+        size="Value_K",
+        size_max=22,
+        hover_name="Customer",
+        hover_data={"lat": False, "lon": False, "Value_K": False,
+                    "Value": ":$,.0f", "Segment": True},
+        zoom=10,
+        center={"lat": 37.3382, "lon": -121.9000},
+        mapbox_style="open-street-map",
+        height=480,
+    )
+    fig_map.update_layout(
+        paper_bgcolor=PAPER_BG,
+        font=dict(color="#C9D1D9"),
+        margin=dict(l=0, r=0, t=0, b=0),
+        legend=dict(bgcolor="rgba(13,17,23,0.85)", bordercolor="#30363D",
+                    borderwidth=1, font=dict(color="#C9D1D9")),
+    )
+    st.plotly_chart(fig_map, use_container_width=True, config=CHART_CFG)
+
+    section_divider()
+
+    # Revenue by segment breakdown
+    st.markdown('<div style="color:#C9D1D9;font-size:13px;font-weight:600;margin-bottom:8px">Revenue by Site</div>', unsafe_allow_html=True)
+    map_disp = map_df_f.copy()
+    map_disp["Value"] = map_disp["Value"].map(lambda v: f"${v:,.0f}")
+    map_disp = map_disp.drop(columns=["lat","lon","Value_K","Label"])
+    st.dataframe(map_disp.sort_values("Value", ascending=False),
+                 use_container_width=True, hide_index=True)
