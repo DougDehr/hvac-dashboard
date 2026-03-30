@@ -584,7 +584,7 @@ if "Sales" in page:
     avg_deal  = won["Value"].mean() if n_closed else 0
 
     n_reps         = 6
-    annual_quota   = 5_000_000 * n_reps          # $5M per rep annually → $30M total
+    annual_quota   = 3_600_000 * n_reps          # $3.6M per rep annually → Q1 quota ~$5.4M → ~110% attainment
     quota_attain   = ytd_rev / (annual_quota / 4) * 100   # vs Q1 quota
     rev_per_rep    = ytd_rev / n_reps
     avg_cycle_days = 42
@@ -974,8 +974,8 @@ if "Sales" in page:
     np.random.seed(99)
     rep_names    = ["Jordan Mills", "Taylor Chen", "Sam Rivera", "Alex Park", "Casey Brooks", "Morgan Lee"]
     seg_focus    = ["Chip/Semi", "Education", "Office", "Restaurant", "Education", "Chip/Semi"]
-    rep_quotas   = [1_250_000] * 6                          # Q1 quota per rep ($5M/4)
-    rep_revenues = np.random.uniform(0.55, 1.30, 6) * 1_250_000
+    rep_quotas   = [900_000] * 6                            # Q1 quota per rep ($3.6M/4)
+    rep_revenues = np.random.uniform(0.55, 1.30, 6) * 900_000
     rep_deals    = np.random.randint(4, 18, 6)
     rep_attain   = rep_revenues / np.array(rep_quotas) * 100
 
@@ -1023,7 +1023,7 @@ if "Sales" in page:
         hovertemplate="<b>%{x}</b><br>Revenue: $%{y:,.0f}<extra></extra>",
     ))
     fig_lb.add_hline(y=520_000, line_dash="dash", line_color="#8B949E", line_width=1.5,
-                     annotation_text="Quota $1.25M", annotation_position="top right",
+                     annotation_text="Quota $900K", annotation_position="top right",
                      annotation_font=dict(color="#8B949E", size=10))
     fig_lb.update_yaxes(tickprefix="$", tickformat=",.0f")
     base_layout(fig_lb, height=300, legend=False, title="Revenue by Rep vs Quota")
