@@ -357,7 +357,7 @@ with st.sidebar:
     # Navigation
     page = st.radio(
         " ",
-        ["📈  Sales", "💰  Finance", "🏢  Segments", "📋  Jobs", "📊  LRP", "🔀  Pipeline", "🗺️  Territory"],
+        ["📈  Sales", "💰  Finance", "🏢  Segments", "📋  Jobs", "👷  Field Team", "📊  LRP", "🔀  Pipeline", "🗺️  Territory"],
         label_visibility="collapsed",
     )
 
@@ -1460,6 +1460,303 @@ elif "Jobs" in page:
             st.markdown("<div style='margin-top:12px;color:#8B949E;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.7px'>Saved Estimates</div>", unsafe_allow_html=True)
             est_df = pd.DataFrame(st.session_state.estimates)
             st.dataframe(est_df, use_container_width=True, hide_index=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: FIELD TEAM
+# ══════════════════════════════════════════════════════════════════════════════
+elif "Field Team" in page:
+    page_header("Field Team", date_label)
+
+    # ── Mock data ─────────────────────────────────────────────────────────────
+    random.seed(42)
+    np.random.seed(42)
+
+    tech_names = [
+        "Mike Kowalski", "Dana Reyes", "Tom Nguyen", "Sara Patel",
+        "Chris Albano", "Jesse Brown", "Pat Deluca", "Amir Hassan",
+    ]
+    tech_certs = [
+        "EPA 608, NATE",
+        "EPA 608, NATE, HVAC Excellence",
+        "EPA 608",
+        "EPA 608, NATE",
+        "EPA 608, NATE, BPI",
+        "EPA 608",
+        "EPA 608, NATE, HVAC Excellence",
+        "EPA 608, NATE",
+    ]
+    tech_segments = ["Chip/Semi", "Education", "Office", "Restaurant",
+                     "Chip/Semi", "Office", "Education", "Restaurant"]
+
+    # Jobs/day: 3-5 for normal segs, 2-3 for Chip/Semi (longer jobs)
+    jobs_per_day = {
+        "Chip/Semi": np.random.uniform(2.2, 3.2),
+        "Education": np.random.uniform(3.5, 4.8),
+        "Office":    np.random.uniform(3.2, 4.5),
+        "Restaurant":np.random.uniform(3.8, 5.0),
+    }
+    # Revenue per job by segment
+    rev_per_job = {
+        "Chip/Semi":  random.randint(1800, 3200),
+        "Education":  random.randint(650,  1100),
+        "Office":     random.randint(550,   950),
+        "Restaurant": random.randint(280,   520),
+    }
+    work_days_mtd = 21  # March has ~21 work days
+
+    tech_rows = []
+    for i, name in enumerate(tech_names):
+        seg  = tech_segments[i]
+        jpd  = jobs_per_day[seg]
+        jobs = int(round(jpd * work_days_mtd * random.uniform(0.82, 1.05)))
+        dur  = round(8 / jpd, 1)                          # avg hrs per job
+        rev  = jobs * rev_per_job[seg]
+        util = round(min(99, jpd / 5 * 100 * random.uniform(0.88, 1.05)), 1)
+        status_roll = random.random()
+        status = "On Job" if status_roll < 0.5 else ("Available" if status_roll < 0.85 else "Active")
+        tech_rows.append({
+            "Name": name, "Certifications": tech_certs[i], "Segment": seg,
+            "Jobs MTD": jobs, "Avg Duration (hrs)": dur,
+            "Revenue": rev, "Utilization %": util, "Status": status,
+        })
+    tech_df = pd.DataFrame(tech_rows)
+
+    # 6-month utilization trend per tech
+    months_6 = ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
+    util_trends = {}
+    for _, row in tech_df.iterrows():
+        base = row["Utilization %"]
+        util_trends[row["Name"]] = np.clip(
+            base + np.random.uniform(-12, 12, 6), 40, 99
+        ).round(1)
+
+    # Installer crews
+    crew_names   = ["Crew Alpha", "Crew Beta", "Crew Gamma", "Crew Delta"]
+    crew_sizes   = [3, 2, 3, 2]
+    crew_segs    = ["Chip/Semi", "Education", "Office", "Restaurant"]
+    proj_dur_days = {"Chip/Semi": (5, 9), "Education": (3, 6),
+                     "Office": (3, 5), "Restaurant": (1, 3)}
+
+    crew_rows = []
+    gantt_rows = []
+    today = pd.Timestamp("2026-03-30")
+    for i, crew in enumerate(crew_names):
+        seg  = crew_segs[i]
+        lo, hi = proj_dur_days[seg]
+        active  = random.randint(1, 2)
+        done    = random.randint(3, 7)
+        avg_dur = round(random.uniform(lo, hi), 1)
+        rev_proj = random.randint(12000, 45000) if seg == "Chip/Semi" else random.randint(4000, 18000)
+        rev_total = rev_proj * (active + done)
+        status = "Active" if active > 0 else "Between Jobs"
+        crew_rows.append({
+            "Crew": crew, "Size": crew_sizes[i], "Segment": seg,
+            "Active Projects": active, "Completed MTD": done,
+            "Avg Duration (days)": avg_dur, "Revenue": rev_total, "Status": status,
+        })
+        # Gantt: one active project bar per crew
+        start = today - pd.Timedelta(days=random.randint(1, int(avg_dur)))
+        end   = start + pd.Timedelta(days=int(avg_dur * random.uniform(0.8, 1.2)))
+        gantt_rows.append({"Crew": crew, "Segment": seg,
+                           "Start": start, "End": max(end, today + pd.Timedelta(days=1))})
+    crew_df  = pd.DataFrame(crew_rows)
+    gantt_df = pd.DataFrame(gantt_rows)
+
+    # ── Top KPI row ───────────────────────────────────────────────────────────
+    total_field  = len(tech_df) + len(crew_df) * 2  # rough headcount
+    techs_on_duty = tech_df[tech_df["Status"] == "On Job"].shape[0]
+    inst_active   = crew_df[crew_df["Status"] == "Active"].shape[0]
+    avg_jpd       = round(tech_df["Jobs MTD"].sum() / len(tech_df) / work_days_mtd, 1)
+    avg_util      = round(tech_df["Utilization %"].mean(), 1)
+    rev_per_emp   = int((tech_df["Revenue"].sum() + crew_df["Revenue"].sum()) / total_field)
+
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    for col, lbl, val, delta, pos, acc in [
+        (k1, "Total Field Employees", str(total_field),          "8 techs · 4 crews",    True,  BLUE),
+        (k2, "Techs on Duty",         str(techs_on_duty),        "on job right now",     True,  BLUE),
+        (k3, "Installer Crews Active",str(inst_active),          "active projects",      True,  ORANGE),
+        (k4, "Avg Jobs / Tech / Day",  str(avg_jpd),             "MTD average",          True,  TEAL),
+        (k5, "Tech Utilization",       f"{avg_util}%",           "green >80%",           avg_util >= 80, GREEN if avg_util >= 80 else ORANGE),
+        (k6, "Revenue / Field Employee", fmt_usd(rev_per_emp),   "MTD",                  True,  PURPLE),
+    ]:
+        with col:
+            st.markdown(kpi_card(lbl, val, delta, pos, acc), unsafe_allow_html=True)
+
+    st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
+
+    # ── Tabs ──────────────────────────────────────────────────────────────────
+    tab_tech, tab_inst = st.tabs(["🔧 Technicians", "🏗️ Installers"])
+
+    # ════════════════════════════ TECHNICIANS TAB ════════════════════════════
+    with tab_tech:
+        st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
+
+        # Tech KPI mini-row
+        top_tech = tech_df.loc[tech_df["Revenue"].idxmax()]
+        total_hrs = int((tech_df["Jobs MTD"] * tech_df["Avg Duration (hrs)"]).sum())
+        tk1, tk2, tk3 = st.columns(3)
+        for col, lbl, val, delta, pos, acc in [
+            (tk1, "Top Performer",      top_tech["Name"],          f"{fmt_usd(top_tech['Revenue'])} MTD", True, BLUE),
+            (tk2, "Avg Jobs / Day",     str(avg_jpd),              "across all techs",                   True, BLUE),
+            (tk3, "Total Hours Logged", f"{total_hrs:,}",          "MTD field hours",                    True, TEAL),
+        ]:
+            with col:
+                st.markdown(kpi_card(lbl, val, delta, pos, acc), unsafe_allow_html=True)
+
+        st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+
+        # Tech table
+        def util_badge(u):
+            color = "#4CAF50" if u >= 80 else ("#FF9800" if u >= 60 else "#EF5350")
+            return f'<span style="color:{color};font-weight:600">{u}%</span>'
+
+        disp_tech = tech_df.copy()
+        disp_tech["Revenue"] = disp_tech["Revenue"].map(lambda v: f"${v:,.0f}")
+        disp_tech = disp_tech.drop(columns=["Segment"])
+        st.dataframe(
+            disp_tech.rename(columns={
+                "Name": "Technician", "Jobs MTD": "Jobs (MTD)",
+                "Avg Duration (hrs)": "Avg Hrs/Job", "Utilization %": "Util %",
+            }),
+            use_container_width=True, hide_index=True,
+            column_config={
+                "Technician":    st.column_config.TextColumn("Technician",    width="medium"),
+                "Certifications":st.column_config.TextColumn("Certifications",width="large"),
+                "Jobs (MTD)":    st.column_config.NumberColumn("Jobs (MTD)",  width="small"),
+                "Avg Hrs/Job":   st.column_config.NumberColumn("Avg Hrs/Job", width="small"),
+                "Revenue":       st.column_config.TextColumn("Revenue",       width="small"),
+                "Util %":        st.column_config.NumberColumn("Util %",      width="small"),
+                "Status":        st.column_config.TextColumn("Status",        width="small"),
+            }
+        )
+
+        section_divider()
+
+        ca, cb = st.columns(2)
+
+        with ca:
+            # Bar: jobs completed by tech
+            bar_order = tech_df.sort_values("Jobs MTD", ascending=True)
+            fig_tb = go.Figure(go.Bar(
+                x=bar_order["Jobs MTD"], y=bar_order["Name"],
+                orientation="h",
+                marker_color=[
+                    GREEN if u >= 80 else (ORANGE if u >= 60 else RED)
+                    for u in bar_order["Utilization %"]
+                ],
+                text=bar_order["Jobs MTD"], textposition="outside",
+            ))
+            base_layout(fig_tb, height=320, title="Jobs Completed by Tech — MTD", legend=False)
+            fig_tb.update_xaxes(title_text="Jobs")
+            st.plotly_chart(fig_tb, use_container_width=True, config=CHART_CFG)
+
+        with cb:
+            # Line: utilization trend 6 months
+            fig_ut = go.Figure()
+            for name, trend in util_trends.items():
+                fig_ut.add_trace(go.Scatter(
+                    x=months_6, y=trend, mode="lines",
+                    name=name, line=dict(width=1.5),
+                    hovertemplate=f"<b>{name}</b><br>%{{x}}: %{{y:.1f}}%<extra></extra>",
+                ))
+            fig_ut.add_hline(y=80, line_dash="dot", line_color=GREEN,
+                             annotation_text="80% target", annotation_position="bottom right")
+            base_layout(fig_ut, height=320, title="Tech Utilization Trend — 6 Months")
+            fig_ut.update_yaxes(ticksuffix="%", range=[30, 105])
+            st.plotly_chart(fig_ut, use_container_width=True, config=CHART_CFG)
+
+    # ════════════════════════════ INSTALLERS TAB ════════════════════════════
+    with tab_inst:
+        st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
+
+        # Installer KPI mini-row
+        total_installs = int(crew_df["Completed MTD"].sum())
+        avg_proj_dur   = round(crew_df["Avg Duration (days)"].mean(), 1)
+        ik1, ik2, ik3 = st.columns(3)
+        for col, lbl, val, delta, pos, acc in [
+            (ik1, "Active Crews",         str(inst_active),          "on site now",            True,  ORANGE),
+            (ik2, "Avg Project Duration", f"{avg_proj_dur} days",    "across all crews",       True,  ORANGE),
+            (ik3, "Total Installs MTD",   str(total_installs),       "completed this month",   True,  TEAL),
+        ]:
+            with col:
+                st.markdown(kpi_card(lbl, val, delta, pos, acc), unsafe_allow_html=True)
+
+        st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+
+        # Crew table
+        disp_crew = crew_df.copy()
+        disp_crew["Revenue"] = disp_crew["Revenue"].map(lambda v: f"${v:,.0f}")
+        st.dataframe(
+            disp_crew.rename(columns={
+                "Crew": "Installer Crew", "Size": "Crew Size",
+                "Active Projects": "Active", "Completed MTD": "Completed (MTD)",
+                "Avg Duration (days)": "Avg Days/Project",
+            }),
+            use_container_width=True, hide_index=True,
+            column_config={
+                "Installer Crew":    st.column_config.TextColumn("Installer Crew",   width="medium"),
+                "Segment":           st.column_config.TextColumn("Segment",          width="medium"),
+                "Crew Size":         st.column_config.NumberColumn("Crew Size",      width="small"),
+                "Active":            st.column_config.NumberColumn("Active",         width="small"),
+                "Completed (MTD)":   st.column_config.NumberColumn("Completed (MTD)",width="small"),
+                "Avg Days/Project":  st.column_config.NumberColumn("Avg Days/Proj",  width="small"),
+                "Revenue":           st.column_config.TextColumn("Revenue",          width="small"),
+                "Status":            st.column_config.TextColumn("Status",           width="small"),
+            }
+        )
+
+        section_divider()
+
+        cc, cd = st.columns(2)
+
+        with cc:
+            # Bar: revenue by crew
+            crew_sorted = crew_df.sort_values("Revenue", ascending=True)
+            fig_cr = go.Figure(go.Bar(
+                x=crew_sorted["Revenue"], y=crew_sorted["Crew"],
+                orientation="h",
+                marker_color=[ORANGE, ORANGE, ORANGE, ORANGE],
+                text=crew_sorted["Revenue"].map(lambda v: fmt_usd(v)),
+                textposition="outside",
+            ))
+            base_layout(fig_cr, height=280, title="Revenue by Installer Crew — MTD", legend=False)
+            fig_cr.update_xaxes(tickprefix="$", tickformat=",.0f")
+            st.plotly_chart(fig_cr, use_container_width=True, config=CHART_CFG)
+
+        with cd:
+            # Gantt: active projects
+            fig_g = go.Figure()
+            seg_colors = {"Chip/Semi": ORANGE, "Education": BLUE,
+                          "Office": TEAL, "Restaurant": GREEN}
+            for _, row in gantt_df.iterrows():
+                dur_ms = (row["End"] - row["Start"]).total_seconds() * 1000
+                fig_g.add_trace(go.Bar(
+                    x=[dur_ms], y=[row["Crew"]],
+                    base=[row["Start"].timestamp() * 1000],
+                    orientation="h",
+                    marker_color=seg_colors.get(row["Segment"], BLUE),
+                    name=row["Segment"],
+                    showlegend=False,
+                    hovertemplate=(
+                        f"<b>{row['Crew']}</b><br>"
+                        f"Start: {row['Start'].strftime('%b %d')}<br>"
+                        f"End: {row['End'].strftime('%b %d')}<extra></extra>"
+                    ),
+                ))
+            # Today line
+            today_ms = today.timestamp() * 1000
+            fig_g.add_vline(x=today_ms, line_dash="dot", line_color="#8B949E", line_width=1)
+            fig_g.add_annotation(x=today_ms, y=1.04, yref="paper", xref="x",
+                                 text="Today", showarrow=False,
+                                 font=dict(color="#8B949E", size=10), xanchor="center")
+            base_layout(fig_g, height=280, title="Active Projects — Gantt View", legend=False)
+            fig_g.update_xaxes(
+                type="date",
+                tickformat="%b %d",
+                tickfont=dict(color=TICK_COL, size=10),
+            )
+            st.plotly_chart(fig_g, use_container_width=True, config=CHART_CFG)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
