@@ -27,6 +27,7 @@ st.markdown("""
   .block-container { padding-top: 48px !important; }
 
   /* Sidebar nav radio — make it look like a nav menu */
+  [data-testid="stRadio"] > label { display: none !important; }
   [data-testid="stRadio"] > div { gap: 2px !important; }
   [data-testid="stRadio"] label {
     display: flex !important;
