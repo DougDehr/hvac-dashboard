@@ -832,7 +832,7 @@ if "Sales" in page:
                             range=[0, 120]),
             )
 
-        fig.update_yaxes(tickprefix="$", tickformat=",.0f")
+        fig.update_layout(yaxis=dict(tickprefix="$", tickformat=",.0f"))
         fig.update_xaxes(tickangle=-40)
         total_fcst_rev = yr2026["seg_rev"].sum()
         wx_note = "  🌡️ +temp" if show_weather else ""
