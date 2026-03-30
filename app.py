@@ -27,7 +27,8 @@ st.markdown("""
   .block-container { padding-top: 48px !important; }
 
   /* Sidebar nav radio — make it look like a nav menu */
-  [data-testid="stRadio"] > label { display: none !important; }
+  [data-testid="stRadio"] > label,
+  [data-testid="stRadio"] [data-testid="stWidgetLabel"] { display: none !important; }
   [data-testid="stRadio"] > div { gap: 2px !important; }
   [data-testid="stRadio"] label {
     display: flex !important;
@@ -355,7 +356,7 @@ with st.sidebar:
 
     # Navigation
     page = st.radio(
-        "nav",
+        " ",
         ["📈  Sales", "💰  Finance", "🏢  Segments", "📋  Jobs", "📊  LRP", "🔀  Pipeline", "🗺️  Territory"],
         label_visibility="collapsed",
     )
