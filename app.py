@@ -796,10 +796,12 @@ if "Sales" in page:
         fig.add_hline(y=target_mo, line_dash="dot", line_color=GREEN, line_width=1.4,
                       annotation_text="$30M target / mo", annotation_position="top right",
                       annotation_font=dict(color=GREEN, size=10))
-        # Actuals | Forecast divider
-        fig.add_vline(x="Mar 2026", line_dash="dot", line_color="#30363D", line_width=1,
-                      annotation_text=" ← Actual  |  Forecast →",
-                      annotation_position="top", annotation_font=dict(color="#8B949E", size=10))
+        # Actuals | Forecast divider — annotation added separately (add_vline annotation
+        # fails on categorical axes in Plotly ≥ 5.20 because it tries to mean() strings)
+        fig.add_vline(x="Mar 2026", line_dash="dot", line_color="#30363D", line_width=1)
+        fig.add_annotation(x="Mar 2026", y=1.04, yref="paper", xref="x",
+                           text="← Actual | Forecast →", showarrow=False,
+                           font=dict(color="#8B949E", size=10), xanchor="center")
         fig.update_yaxes(tickprefix="$", tickformat=",.0f")
         fig.update_xaxes(tickangle=-40)
         total_fcst_rev = yr2026["seg_rev"].sum()
