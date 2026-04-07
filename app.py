@@ -369,9 +369,9 @@ with st.sidebar:
     max_d = monthly_df["date"].max().date()
     ca, cb = st.columns(2)
     with ca:
-        start_date = st.date_input("From", value=date(2025, 1, 1), min_value=min_d, max_value=max_d)
+        start_date = st.date_input("From", value=date(2026, 1, 1), min_value=min_d, max_value=max_d)
     with cb:
-        end_date = st.date_input("To",   value=date(2025, 12, 1), min_value=min_d, max_value=max_d)
+        end_date = st.date_input("To",   value=date(2026, 3, 1), min_value=min_d, max_value=max_d)
 
     st.markdown('<hr style="border:none;border-top:1px solid #21262D;margin:14px 0">', unsafe_allow_html=True)
 
