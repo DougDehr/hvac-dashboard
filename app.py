@@ -25,6 +25,8 @@ st.markdown("""
   }
   /* Remove default top padding */
   .block-container { padding-top: 48px !important; }
+  /* Date inputs — larger text */
+  [data-testid="stDateInput"] input { font-size: 15px !important; }
 
   /* Sidebar nav radio — make it look like a nav menu */
   [data-testid="stRadio"] > label,
