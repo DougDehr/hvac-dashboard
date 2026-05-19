@@ -1034,6 +1034,114 @@ if "Sales" in page:
     st.plotly_chart(fig_lb, use_container_width=True, config=CHART_CFG)
 
 
+    # ── AI Variance Analysis ──────────────────────────────────────────────────
+    section_divider()
+    st.markdown(
+        '<div class="chart-label" style="display:flex;align-items:center;gap:8px">'
+        '✨ AI Variance Analysis</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Build context snapshot from current data
+    seg_rev_dict = {
+        "Education":       float(fdf["education_rev"].sum()),
+        "Office":          float(fdf["office_rev"].sum()),
+        "Restaurant":      float(fdf["restaurant_rev"].sum()),
+        "Chip/Semi":       float(fdf["chip_rev"].sum()),
+    }
+    seg_total = sum(seg_rev_dict.values())
+    prior_months = monthly_df[
+        (monthly_df["is_forecast"] == False) &
+        (monthly_df["date"].dt.year == 2025)
+    ].copy()
+    prior_months["seg_rev"] = prior_months[rev_cols].sum(axis=1)
+    prior_q1 = prior_months[prior_months["date"].dt.month.isin([1, 2, 3])]["seg_rev"].sum()
+
+    yoy_delta_pct = ((ytd_rev - prior_q1) / prior_q1 * 100) if prior_q1 else 0
+
+    context_block = f"""
+AirFlow HVAC — Sales Variance Summary (Q1 2026)
+
+KEY METRICS:
+- YTD Revenue (Q1 2026): ${ytd_rev:,.0f}
+- YTD Revenue (Q1 2025): ${prior_q1:,.0f}
+- YoY Growth: {yoy_delta_pct:+.1f}%
+- Quota Attainment: {quota_attain:.1f}% (vs 100% target)
+- Pipeline Value: ${pipeline:,.0f}
+- Deals Closed: {n_closed}
+- Avg Deal Size: ${avg_deal:,.0f}
+- Win Rate: {win_rate_pct:.1f}%
+- Avg Sales Cycle: {avg_cycle_days} days
+- Revenue/Rep: ${rev_per_rep:,.0f}
+
+SEGMENT BREAKDOWN (selected period):
+{chr(10).join(f'- {seg}: ${rev:,.0f} ({rev/seg_total*100:.1f}% of mix)' for seg, rev in seg_rev_dict.items())}
+
+90-DAY FORECAST:
+- Apr 2026: ${forecast_vals[0]:,.0f}
+- May 2026: ${forecast_vals[1]:,.0f}
+- Jun 2026: ${forecast_vals[2]:,.0f}
+
+SALES REP PERFORMANCE (Q1 2026):
+{chr(10).join(f'- {rep_names[i]}: ${rep_revenues[i]:,.0f} ({rep_attain[i]:.0f}% of quota, focus: {seg_focus[i]})' for i in order)}
+"""
+
+    if "ai_variance" not in st.session_state:
+        st.session_state.ai_variance = None
+
+    if st.button("✨ Generate Variance Analysis", use_container_width=False, key="gen_variance"):
+        try:
+            import anthropic as _anthropic
+            api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+            if not api_key:
+                st.error("Add ANTHROPIC_API_KEY to .streamlit/secrets.toml to enable AI analysis.")
+            else:
+                client = _anthropic.Anthropic(api_key=api_key)
+                with st.spinner("Analyzing..."):
+                    message = client.messages.create(
+                        model="claude-opus-4-6",
+                        max_tokens=600,
+                        messages=[{
+                            "role": "user",
+                            "content": (
+                                "You are a senior revenue analyst for AirFlow HVAC, an HVAC services company "
+                                "operating in upstate New York (Buffalo, Rochester, Syracuse). "
+                                "Write a concise variance analysis (4-6 sentences, plain English, no bullet points) "
+                                "covering: what's driving YoY growth or decline, which segment is over/underperforming, "
+                                "any quota or pipeline concerns, and one forward-looking observation about the 90-day forecast. "
+                                "Be specific, use the numbers, and write in a professional but direct tone.\n\n"
+                                f"{context_block}"
+                            ),
+                        }],
+                    )
+                    st.session_state.ai_variance = message.content[0].text
+        except ImportError:
+            st.error("anthropic package not installed. Run: pip install anthropic")
+        except Exception as e:
+            st.error(f"Analysis failed: {e}")
+
+    if st.session_state.ai_variance:
+        st.markdown(
+            f"""
+            <div style="
+                background:linear-gradient(135deg,#161B22 0%,#1C2333 100%);
+                border:1px solid #30363D;
+                border-left:4px solid {BLUE};
+                border-radius:8px;
+                padding:18px 20px;
+                margin-top:12px;
+                color:#C9D1D9;
+                font-size:14px;
+                line-height:1.7;
+            ">{st.session_state.ai_variance}</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("↺ Regenerate", key="regen_variance"):
+            st.session_state.ai_variance = None
+            st.rerun()
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: FINANCE
 # ══════════════════════════════════════════════════════════════════════════════
