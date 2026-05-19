@@ -1106,10 +1106,17 @@ SALES REP PERFORMANCE (Q1 2026):
                             "content": (
                                 "You are a senior revenue analyst for AirFlow HVAC, an HVAC services company "
                                 "operating in upstate New York (Buffalo, Rochester, Syracuse). "
-                                "Write a concise variance analysis (4-6 sentences, plain English, no bullet points) "
-                                "covering: what's driving YoY growth or decline, which segment is over/underperforming, "
-                                "any quota or pipeline concerns, and one forward-looking observation about the 90-day forecast. "
-                                "Be specific, use the numbers, and write in a professional but direct tone.\n\n"
+                                "Write a structured variance analysis using this exact format:\n\n"
+                                "**Overall Performance**\n"
+                                "One sentence summary of YoY performance with the key number.\n\n"
+                                "**What's Working**\n"
+                                "- 2-3 bullets on the strongest drivers (segments, reps, deal size, etc.)\n\n"
+                                "**Watch Items**\n"
+                                "- 2-3 bullets on underperformance, risks, or concerns\n\n"
+                                "**90-Day Outlook**\n"
+                                "One forward-looking sentence about the forecast with specific numbers.\n\n"
+                                "Be specific, use the numbers from the data, and keep each bullet to one crisp sentence. "
+                                "Professional but direct tone. No filler phrases.\n\n"
                                 f"{context_block}"
                             ),
                         }],
@@ -1122,21 +1129,12 @@ SALES REP PERFORMANCE (Q1 2026):
 
     if st.session_state.ai_variance:
         st.markdown(
-            f"""
-            <div style="
-                background:linear-gradient(135deg,#161B22 0%,#1C2333 100%);
-                border:1px solid #30363D;
-                border-left:4px solid {BLUE};
-                border-radius:8px;
-                padding:18px 20px;
-                margin-top:12px;
-                color:#C9D1D9;
-                font-size:14px;
-                line-height:1.7;
-            ">{st.session_state.ai_variance}</div>
-            """,
+            f'<div style="background:linear-gradient(135deg,#161B22 0%,#1C2333 100%);'
+            f'border:1px solid #30363D;border-left:4px solid {BLUE};'
+            f'border-radius:8px;padding:4px 20px 12px;margin-top:12px;"></div>',
             unsafe_allow_html=True,
         )
+        st.markdown(st.session_state.ai_variance)
         if st.button("↺ Regenerate", key="regen_variance"):
             st.session_state.ai_variance = None
             st.rerun()
