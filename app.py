@@ -1121,7 +1121,7 @@ SALES REP PERFORMANCE (Q1 2026):
                             ),
                         }],
                     )
-                    st.session_state.ai_variance = message.content[0].text
+                    st.session_state.ai_variance = message.content[0].text.replace("$", "\\$")
         except ImportError:
             st.error("anthropic package not installed. Run: pip install anthropic")
         except Exception as e:
